@@ -81,7 +81,7 @@ router.post("/", requireAuth, requireRole("admin", "staff"), async (req, res) =>
   try {
     const result = await pool.query(
       `INSERT INTO projects (name, description, client_org_name, status, start_date, target_end_date, location, created_by)
-       VALUES ($1, $2, $3, COALESCE($4, 'planning'), $5, $6, $7, $8)
+       VALUES ($1, $2, $3, COALESCE($4::project_status, 'planning'::project_status), $5, $6, $7, $8)
        RETURNING *`,
       [
         name,
@@ -243,7 +243,7 @@ router.post("/:id/members", requireAuth, requireRole("admin", "staff"), async (r
   try {
     const result = await pool.query(
       `INSERT INTO project_members (project_id, user_id, membership_role)
-       VALUES ($1, $2, COALESCE($3, 'viewer'))
+       VALUES ($1, $2, COALESCE($3::membership_role, 'viewer'::membership_role))
        ON CONFLICT (project_id, user_id) DO UPDATE SET membership_role = EXCLUDED.membership_role
        RETURNING *`,
       [req.params.id, userId, membershipRole || null]

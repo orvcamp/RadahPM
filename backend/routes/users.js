@@ -69,7 +69,7 @@ router.post("/", requireAuth, requireRole("admin", "staff"), async (req, res) =>
 
     const result = await pool.query(
       `INSERT INTO users (email, password_hash, full_name, role, company_name, phone)
-       VALUES ($1, $2, $3, $4, $5, $6)
+       VALUES ($1, $2, $3, $4::user_role, $5, $6)
        RETURNING *`,
       [email.toLowerCase().trim(), passwordHash, fullName, role, companyName || null, phone || null]
     );

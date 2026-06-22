@@ -122,7 +122,7 @@ router.post(
       const result = await pool.query(
         `INSERT INTO tasks
            (project_id, phase_id, parent_task_id, title, description, status, is_milestone, start_date, due_date, assigned_to, created_by, sort_order)
-         VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'not_started'), COALESCE($7, FALSE), $8, $9, $10, $11, COALESCE($12, 0))
+         VALUES ($1, $2, $3, $4, $5, COALESCE($6::task_status, 'not_started'::task_status), COALESCE($7, FALSE), $8, $9, $10, $11, COALESCE($12, 0))
          RETURNING *`,
         [
           req.params.projectId,
