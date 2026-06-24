@@ -9,6 +9,7 @@ const userRoutes = require("./routes/users");
 const projectRoutes = require("./routes/projects");
 const phaseRoutes = require("./routes/phases");
 const taskRoutes = require("./routes/tasks");
+const documentRoutes = require("./routes/documents");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -37,6 +38,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/projects", projectRoutes);
 app.use("/api", phaseRoutes); // mounts /api/projects/:projectId/phases and /api/phases/:id
 app.use("/api", taskRoutes); // mounts /api/projects/:projectId/tasks and /api/tasks/:id
+app.use("/api", documentRoutes); // mounts /api/projects/:projectId/documents and /api/documents/:id
 
 // 404 handler
 app.use((req, res) => {

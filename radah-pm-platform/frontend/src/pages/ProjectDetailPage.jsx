@@ -6,6 +6,7 @@ import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext.jsx";
 import GanttChart from "../components/GanttChart.jsx";
 import TaskModal from "../components/TaskModal.jsx";
+import DocumentsTab from "../components/DocumentsTab.jsx";
 
 function AddPhaseInline({ projectId, onAdded }) {
   const [name, setName] = useState("");
@@ -177,6 +178,7 @@ export default function ProjectDetailPage() {
         <button className={`tab-btn ${tab === "tasks" ? "active" : ""}`} onClick={() => setTab("tasks")}>Tasks</button>
         <button className={`tab-btn ${tab === "phases" ? "active" : ""}`} onClick={() => setTab("phases")}>Phases</button>
         <button className={`tab-btn ${tab === "team" ? "active" : ""}`} onClick={() => setTab("team")}>Team</button>
+        <button className={`tab-btn ${tab === "documents" ? "active" : ""}`} onClick={() => setTab("documents")}>Documents</button>
       </div>
 
       {tab === "timeline" && (
@@ -298,6 +300,8 @@ export default function ProjectDetailPage() {
           )}
         </div>
       )}
+
+      {tab === "documents" && <DocumentsTab projectId={id} />}
 
       {taskModal !== null && (
         <TaskModal
