@@ -12,6 +12,7 @@ const taskRoutes = require("./routes/tasks");
 const documentRoutes = require("./routes/documents");
 const budgetRoutes = require("./routes/budget");
 const changeOrderRoutes = require("./routes/changeorders");
+const dailyLogRoutes = require("./routes/dailylogs");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -43,6 +44,7 @@ app.use("/api", taskRoutes); // mounts /api/projects/:projectId/tasks and /api/t
 app.use("/api", documentRoutes); // mounts /api/projects/:projectId/documents and /api/documents/:id
 app.use("/api", budgetRoutes); // mounts /api/projects/:projectId/budget and /api/budget-*/:id
 app.use("/api", changeOrderRoutes); // mounts /api/projects/:projectId/change-orders and /api/change-orders/:id
+app.use("/api", dailyLogRoutes); // mounts /api/projects/:projectId/daily-logs and /api/daily-logs/:id
 
 // 404 handler
 app.use((req, res) => {
