@@ -8,6 +8,7 @@ import GanttChart from "../components/GanttChart.jsx";
 import TaskModal from "../components/TaskModal.jsx";
 import DocumentsTab from "../components/DocumentsTab.jsx";
 import BudgetTab from "../components/BudgetTab.jsx";
+import ChangeOrdersTab from "../components/ChangeOrdersTab.jsx";
 
 function AddPhaseInline({ projectId, onAdded }) {
   const [name, setName] = useState("");
@@ -183,6 +184,9 @@ export default function ProjectDetailPage() {
         {user.role !== "trade_partner" && (
           <button className={`tab-btn ${tab === "budget" ? "active" : ""}`} onClick={() => setTab("budget")}>Budget</button>
         )}
+        {user.role !== "trade_partner" && (
+          <button className={`tab-btn ${tab === "changeorders" ? "active" : ""}`} onClick={() => setTab("changeorders")}>Change Orders</button>
+        )}
       </div>
 
       {tab === "timeline" && (
@@ -308,6 +312,8 @@ export default function ProjectDetailPage() {
       {tab === "documents" && <DocumentsTab projectId={id} />}
 
       {tab === "budget" && user.role !== "trade_partner" && <BudgetTab projectId={id} />}
+
+      {tab === "changeorders" && user.role !== "trade_partner" && <ChangeOrdersTab projectId={id} />}
 
       {taskModal !== null && (
         <TaskModal

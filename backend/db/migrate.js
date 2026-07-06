@@ -31,6 +31,7 @@ async function migrate() {
     await runSqlFile("schema.sql", "Phase 1 schema migration");
     await runSqlFile("migrations_phase2.sql", "Phase 2 migration (documents)");
     await runSqlFile("migrations_phase2_budgets.sql", "Phase 2 migration (budgets)");
+    await runSqlFile("migrations_phase2_changeorders.sql", "Phase 2 migration (change orders)");
   } finally {
     await pool.end();
   }
