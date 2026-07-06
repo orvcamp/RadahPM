@@ -3,9 +3,27 @@
 const express = require("express");
 const pool = require("../db/pool");
 const { requireAuth, requireRole } = require("../middleware/auth");
-const { userCanAccessProject } = require("./projects");
+const { userCanAccessProject, resourceProjectId } = require("./projects");
 
 const router = express.Router();
+
+// --- org-isolation guards (Phase 3 A2) ---
+function guardProject(req, res, next) {
+  userCanAccessProject(req.user, req.params.projectId)
+    .then((ok) => (ok ? next() : res.status(403).json({ error: "You do not have access to this project." })))
+    .catch(next);
+}
+function guardResource(table) {
+  return async (req, res, next) => {
+    try {
+      const pid = await resourceProjectId(table, req.params.id);
+      if (!pid || !(await userCanAccessProject(req.user, pid))) {
+        return res.status(404).json({ error: "Not found." });
+      }
+      next();
+    } catch (e) { next(e); }
+  };
+}
 
 function mapPhase(row) {
   return {
@@ -43,7 +61,7 @@ router.get("/projects/:projectId/phases", requireAuth, async (req, res) => {
  * Admin/staff only.
  * Body: { name, sortOrder, startDate, endDate }
  */
-router.post("/projects/:projectId/phases", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+router.post("/projects/:projectId/phases", requireAuth, requireRole("admin", "staff"), guardProject, async (req, res) => {
   const { name, sortOrder, startDate, endDate } = req.body || {};
   if (!name) {
     return res.status(400).json({ error: "Phase name is required." });
@@ -67,7 +85,7 @@ router.post("/projects/:projectId/phases", requireAuth, requireRole("admin", "st
  * PATCH /api/phases/:id
  * Admin/staff only.
  */
-router.patch("/phases/:id", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+router.patch("/phases/:id", requireAuth, requireRole("admin", "staff"), guardResource("phases"), async (req, res) => {
   const bodyKeyMap = {
     name: "name",
     sortOrder: "sort_order",
@@ -110,7 +128,7 @@ router.patch("/phases/:id", requireAuth, requireRole("admin", "staff"), async (r
  * DELETE /api/phases/:id
  * Admin/staff only.
  */
-router.delete("/phases/:id", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+router.delete("/phases/:id", requireAuth, requireRole("admin", "staff"), guardResource("phases"), async (req, res) => {
   try {
     const result = await pool.query("DELETE FROM phases WHERE id = $1 RETURNING id", [
       req.params.id,

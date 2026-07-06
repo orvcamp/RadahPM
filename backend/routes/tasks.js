@@ -9,9 +9,27 @@
 const express = require("express");
 const pool = require("../db/pool");
 const { requireAuth, requireRole, isInternal } = require("../middleware/auth");
-const { userCanAccessProject } = require("./projects");
+const { userCanAccessProject, resourceProjectId } = require("./projects");
 
 const router = express.Router();
+
+// --- org-isolation guards (Phase 3 A2) ---
+function guardProject(req, res, next) {
+  userCanAccessProject(req.user, req.params.projectId)
+    .then((ok) => (ok ? next() : res.status(403).json({ error: "You do not have access to this project." })))
+    .catch(next);
+}
+function guardResource(table) {
+  return async (req, res, next) => {
+    try {
+      const pid = await resourceProjectId(table, req.params.id);
+      if (!pid || !(await userCanAccessProject(req.user, pid))) {
+        return res.status(404).json({ error: "Not found." });
+      }
+      next();
+    } catch (e) { next(e); }
+  };
+}
 
 function mapTask(row) {
   return {
@@ -88,6 +106,7 @@ router.post(
   "/projects/:projectId/tasks",
   requireAuth,
   requireRole("admin", "staff"),
+  guardProject,
   async (req, res) => {
     const { title, description, phaseId, status, isMilestone, startDate, dueDate, assignedTo, sortOrder, parentTaskId } =
       req.body || {};
@@ -292,7 +311,7 @@ router.patch("/tasks/:id", requireAuth, async (req, res) => {
  * DELETE /api/tasks/:id
  * Admin/staff only.
  */
-router.delete("/tasks/:id", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+router.delete("/tasks/:id", requireAuth, requireRole("admin", "staff"), guardResource("tasks"), async (req, res) => {
   try {
     const result = await pool.query("DELETE FROM tasks WHERE id = $1 RETURNING id", [
       req.params.id,

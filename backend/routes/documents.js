@@ -22,10 +22,28 @@ const express = require("express");
 const crypto = require("crypto");
 const pool = require("../db/pool");
 const { requireAuth, requireRole, isInternal } = require("../middleware/auth");
-const { userCanAccessProject } = require("./projects");
+const { userCanAccessProject, resourceProjectId } = require("./projects");
 const r2 = require("../db/r2");
 
 const router = express.Router();
+
+// --- org-isolation guards (Phase 3 A2) ---
+function guardProject(req, res, next) {
+  userCanAccessProject(req.user, req.params.projectId)
+    .then((ok) => (ok ? next() : res.status(403).json({ error: "You do not have access to this project." })))
+    .catch(next);
+}
+function guardResource(table) {
+  return async (req, res, next) => {
+    try {
+      const pid = await resourceProjectId(table, req.params.id);
+      if (!pid || !(await userCanAccessProject(req.user, pid))) {
+        return res.status(404).json({ error: "Not found." });
+      }
+      next();
+    } catch (e) { next(e); }
+  };
+}
 
 function mapDocument(row) {
   return {
@@ -293,6 +311,7 @@ router.post(
   "/projects/:projectId/folders",
   requireAuth,
   requireRole("admin", "staff"),
+  guardProject,
   async (req, res) => {
     const { name, parentFolderId } = req.body || {};
     if (!name || !name.trim()) return res.status(400).json({ error: "Folder name is required." });
@@ -320,7 +339,7 @@ router.post(
 );
 
 // PATCH /api/folders/:id  { name, parentFolderId }  (admin/staff) — rename / move
-router.patch("/folders/:id", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+router.patch("/folders/:id", requireAuth, requireRole("admin", "staff"), guardResource("document_folders"), async (req, res) => {
   try {
     const cur = await pool.query("SELECT * FROM document_folders WHERE id = $1", [req.params.id]);
     const folder = cur.rows[0];
@@ -369,7 +388,7 @@ router.patch("/folders/:id", requireAuth, requireRole("admin", "staff"), async (
 // DELETE /api/folders/:id  (admin/staff)
 // Re-parents child folders and documents up to this folder's parent, then
 // deletes the now-empty folder. No files are lost.
-router.delete("/folders/:id", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+router.delete("/folders/:id", requireAuth, requireRole("admin", "staff"), guardResource("document_folders"), async (req, res) => {
   const client = await pool.connect();
   try {
     const cur = await client.query("SELECT * FROM document_folders WHERE id = $1", [req.params.id]);

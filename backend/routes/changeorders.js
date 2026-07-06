@@ -22,10 +22,28 @@ const express = require("express");
 const crypto = require("crypto");
 const pool = require("../db/pool");
 const { requireAuth, requireRole, isInternal } = require("../middleware/auth");
-const { userCanAccessProject } = require("./projects");
+const { userCanAccessProject, resourceProjectId } = require("./projects");
 const r2 = require("../db/r2");
 
 const router = express.Router();
+
+// --- org-isolation guards (Phase 3 A2) ---
+function guardProject(req, res, next) {
+  userCanAccessProject(req.user, req.params.projectId)
+    .then((ok) => (ok ? next() : res.status(403).json({ error: "You do not have access to this project." })))
+    .catch(next);
+}
+function guardResource(table) {
+  return async (req, res, next) => {
+    try {
+      const pid = await resourceProjectId(table, req.params.id);
+      if (!pid || !(await userCanAccessProject(req.user, pid))) {
+        return res.status(404).json({ error: "Not found." });
+      }
+      next();
+    } catch (e) { next(e); }
+  };
+}
 
 function requireR2(req, res, next) {
   if (!r2.isConfigured) {
@@ -183,6 +201,7 @@ router.post(
   "/projects/:projectId/change-orders",
   requireAuth,
   requireRole("admin", "staff"),
+  guardProject,
   async (req, res) => {
     const { title, description, costImpactCents, categoryId } = req.body || {};
     if (!title || !title.trim()) {
@@ -247,6 +266,7 @@ router.patch(
   "/change-orders/:id",
   requireAuth,
   requireRole("admin", "staff"),
+  guardResource("change_orders"),
   async (req, res) => {
     try {
       const current = await pool.query("SELECT * FROM change_orders WHERE id = $1", [req.params.id]);
@@ -311,7 +331,7 @@ router.patch(
 // POST /api/change-orders/:id/transition   Body: { action }
 //   action = submit | approve | reject | revert
 // ============================================================
-router.post("/change-orders/:id/transition", requireAuth, async (req, res) => {
+router.post("/change-orders/:id/transition", requireAuth, guardResource("change_orders"), async (req, res) => {
   const action = (req.body && req.body.action) || "";
   const valid = ["submit", "approve", "reject", "revert"];
   if (!valid.includes(action)) {
@@ -448,6 +468,7 @@ router.delete(
   "/change-orders/:id",
   requireAuth,
   requireRole("admin", "staff"),
+  guardResource("change_orders"),
   async (req, res) => {
     try {
       const r = await pool.query("DELETE FROM change_orders WHERE id = $1 RETURNING id", [
@@ -473,6 +494,7 @@ router.post(
   "/projects/:projectId/change-orders/:coId/attachments/upload-url",
   requireAuth,
   requireR2,
+  guardProject,
   async (req, res) => {
     try {
       const co = await pool.query(
@@ -502,6 +524,7 @@ router.post(
   "/projects/:projectId/change-orders/:coId/attachments/confirm",
   requireAuth,
   requireR2,
+  guardProject,
   async (req, res) => {
     const { storageKey, fileName, contentType, sizeBytes } = req.body || {};
     if (!storageKey || !fileName) {
@@ -569,6 +592,9 @@ router.delete("/change-order-documents/:id", requireAuth, async (req, res) => {
     );
     const link = r.rows[0];
     if (!link) return res.status(404).json({ error: "Attachment not found." });
+    if (!(await userCanAccessProject(req.user, link.project_id))) {
+      return res.status(404).json({ error: "Attachment not found." });
+    }
     const canDelete = isInternal(req.user) || link.uploaded_by === req.user.id;
     if (!canDelete) {
       return res.status(403).json({ error: "Only the uploader or RADAH staff can remove this attachment." });

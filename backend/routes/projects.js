@@ -307,3 +307,25 @@ router.delete("/:id/members/:userId", requireAuth, requireOrg, requireRole("admi
 
 module.exports = router;
 module.exports.userCanAccessProject = userCanAccessProject;
+
+// Resolves the owning project_id for a child resource, by table. The table
+// name is checked against a fixed whitelist (never user input), so the
+// interpolation below is safe. Returns null if the row doesn't exist.
+// Used by child modules to enforce org isolation on bare-:id write routes.
+const RESOURCE_TABLES = new Set([
+  "budget_categories",
+  "budget_lines",
+  "budget_commitments",
+  "budget_expenses",
+  "change_orders",
+  "daily_logs",
+  "document_folders",
+  "phases",
+  "tasks",
+]);
+async function resourceProjectId(table, id) {
+  if (!RESOURCE_TABLES.has(table)) throw new Error("resourceProjectId: table not allowed");
+  const r = await pool.query(`SELECT project_id FROM ${table} WHERE id = $1`, [id]);
+  return r.rows[0] ? r.rows[0].project_id : null;
+}
+module.exports.resourceProjectId = resourceProjectId;

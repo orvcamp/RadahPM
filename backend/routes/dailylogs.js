@@ -16,10 +16,28 @@ const express = require("express");
 const crypto = require("crypto");
 const pool = require("../db/pool");
 const { requireAuth, isInternal } = require("../middleware/auth");
-const { userCanAccessProject } = require("./projects");
+const { userCanAccessProject, resourceProjectId } = require("./projects");
 const r2 = require("../db/r2");
 
 const router = express.Router();
+
+// --- org-isolation guards (Phase 3 A2) ---
+function guardProject(req, res, next) {
+  userCanAccessProject(req.user, req.params.projectId)
+    .then((ok) => (ok ? next() : res.status(403).json({ error: "You do not have access to this project." })))
+    .catch(next);
+}
+function guardResource(table) {
+  return async (req, res, next) => {
+    try {
+      const pid = await resourceProjectId(table, req.params.id);
+      if (!pid || !(await userCanAccessProject(req.user, pid))) {
+        return res.status(404).json({ error: "Not found." });
+      }
+      next();
+    } catch (e) { next(e); }
+  };
+}
 
 function requireR2(req, res, next) {
   if (!r2.isConfigured) {
@@ -190,7 +208,7 @@ router.post("/projects/:projectId/daily-logs", requireAuth, async (req, res) => 
 // EDIT — PATCH /api/daily-logs/:id
 // Internal, or the trade partner who authored it.
 // ============================================================
-router.patch("/daily-logs/:id", requireAuth, async (req, res) => {
+router.patch("/daily-logs/:id", requireAuth, guardResource("daily_logs"), async (req, res) => {
   try {
     const logRow = await getLogRow(req.params.id);
     if (!logRow) return res.status(404).json({ error: "Daily log not found." });
@@ -257,7 +275,7 @@ router.patch("/daily-logs/:id", requireAuth, async (req, res) => {
 // document rows remain in the project library (only the link is removed
 // by the cascade on daily_log_photos).
 // ============================================================
-router.delete("/daily-logs/:id", requireAuth, async (req, res) => {
+router.delete("/daily-logs/:id", requireAuth, guardResource("daily_logs"), async (req, res) => {
   try {
     const logRow = await getLogRow(req.params.id);
     if (!logRow) return res.status(404).json({ error: "Daily log not found." });
@@ -283,6 +301,7 @@ router.post(
   "/projects/:projectId/daily-logs/:logId/photos/upload-url",
   requireAuth,
   requireR2,
+  guardProject,
   async (req, res) => {
     try {
       const logRow = await getLogRow(req.params.logId);
@@ -311,6 +330,7 @@ router.post(
   "/projects/:projectId/daily-logs/:logId/photos/confirm",
   requireAuth,
   requireR2,
+  guardProject,
   async (req, res) => {
     const { storageKey, fileName, contentType, sizeBytes } = req.body || {};
     if (!storageKey || !fileName) {
@@ -378,6 +398,9 @@ router.delete("/daily-log-photos/:id", requireAuth, async (req, res) => {
     );
     const link = linkRes.rows[0];
     if (!link) return res.status(404).json({ error: "Photo not found." });
+    if (!(await userCanAccessProject(req.user, link.project_id))) {
+      return res.status(404).json({ error: "Photo not found." });
+    }
     if (!canEditLog(req.user, { created_by: link.created_by })) {
       return res.status(403).json({ error: "You can only edit your own daily logs." });
     }

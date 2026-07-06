@@ -22,9 +22,27 @@
 const express = require("express");
 const pool = require("../db/pool");
 const { requireAuth, requireRole } = require("../middleware/auth");
-const { userCanAccessProject } = require("./projects");
+const { userCanAccessProject, resourceProjectId } = require("./projects");
 
 const router = express.Router();
+
+// --- org-isolation guards (Phase 3 A2) ---
+function guardProject(req, res, next) {
+  userCanAccessProject(req.user, req.params.projectId)
+    .then((ok) => (ok ? next() : res.status(403).json({ error: "You do not have access to this project." })))
+    .catch(next);
+}
+function guardResource(table) {
+  return async (req, res, next) => {
+    try {
+      const pid = await resourceProjectId(table, req.params.id);
+      if (!pid || !(await userCanAccessProject(req.user, pid))) {
+        return res.status(404).json({ error: "Not found." });
+      }
+      next();
+    } catch (e) { next(e); }
+  };
+}
 
 const DEFAULT_CATEGORIES = ["Labor", "Materials", "Permits", "Equipment", "Subcontractor", "Other"];
 
@@ -196,6 +214,7 @@ router.post(
   "/projects/:projectId/budget/seed-defaults",
   requireAuth,
   requireRole("admin", "staff"),
+  guardProject,
   async (req, res) => {
     try {
       const existing = await pool.query(
@@ -229,6 +248,7 @@ router.post(
   "/projects/:projectId/budget/categories",
   requireAuth,
   requireRole("admin", "staff"),
+  guardProject,
   async (req, res) => {
     const { name, sortOrder } = req.body || {};
     if (!name || !name.trim()) {
@@ -257,6 +277,7 @@ router.patch(
   "/budget-categories/:id",
   requireAuth,
   requireRole("admin", "staff"),
+  guardResource("budget_categories"),
   async (req, res) => {
     const map = { name: "name", sortOrder: "sort_order" };
     const updates = [];
@@ -296,6 +317,7 @@ router.delete(
   "/budget-categories/:id",
   requireAuth,
   requireRole("admin", "staff"),
+  guardResource("budget_categories"),
   async (req, res) => {
     try {
       const inUse = await pool.query(
@@ -330,6 +352,7 @@ router.post(
   "/projects/:projectId/budget/lines",
   requireAuth,
   requireRole("admin", "staff"),
+  guardProject,
   async (req, res) => {
     const { categoryId, description, budgetedCents, sortOrder } = req.body || {};
     if (!description || !description.trim()) {
@@ -376,6 +399,7 @@ router.patch(
   "/budget-lines/:id",
   requireAuth,
   requireRole("admin", "staff"),
+  guardResource("budget_lines"),
   async (req, res) => {
     const updates = [];
     const values = [];
@@ -456,6 +480,7 @@ router.delete(
   "/budget-lines/:id",
   requireAuth,
   requireRole("admin", "staff"),
+  guardResource("budget_lines"),
   async (req, res) => {
     try {
       const r = await pool.query("DELETE FROM budget_lines WHERE id = $1 RETURNING id", [
@@ -480,6 +505,7 @@ router.post(
   "/projects/:projectId/budget/commitments",
   requireAuth,
   requireRole("admin", "staff"),
+  guardProject,
   async (req, res) => {
     const { budgetLineId, vendorName, description, committedCents, status } = req.body || {};
     if (!budgetLineId) {
@@ -524,6 +550,7 @@ router.patch(
   "/budget-commitments/:id",
   requireAuth,
   requireRole("admin", "staff"),
+  guardResource("budget_commitments"),
   async (req, res) => {
     const updates = [];
     const values = [];
@@ -575,6 +602,7 @@ router.delete(
   "/budget-commitments/:id",
   requireAuth,
   requireRole("admin", "staff"),
+  guardResource("budget_commitments"),
   async (req, res) => {
     try {
       const r = await pool.query(
@@ -601,6 +629,7 @@ router.post(
   "/projects/:projectId/budget/expenses",
   requireAuth,
   requireRole("admin", "staff"),
+  guardProject,
   async (req, res) => {
     const { budgetLineId, commitmentId, vendorName, description, amountCents, expenseDate } =
       req.body || {};
@@ -654,6 +683,7 @@ router.patch(
   "/budget-expenses/:id",
   requireAuth,
   requireRole("admin", "staff"),
+  guardResource("budget_expenses"),
   async (req, res) => {
     const updates = [];
     const values = [];
@@ -708,6 +738,7 @@ router.delete(
   "/budget-expenses/:id",
   requireAuth,
   requireRole("admin", "staff"),
+  guardResource("budget_expenses"),
   async (req, res) => {
     try {
       const r = await pool.query(
