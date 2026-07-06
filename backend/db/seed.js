@@ -27,10 +27,22 @@ async function seed() {
 
     const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 12);
 
+    // Ensure a default organization exists, then place the admin in it as a
+    // platform (super) admin — this is RADAH, which both runs the platform
+    // and is tenant #1.
+    let orgRes = await pool.query("SELECT id FROM organizations ORDER BY created_at ASC LIMIT 1");
+    if (orgRes.rows.length === 0) {
+      orgRes = await pool.query(
+        "INSERT INTO organizations (name) VALUES ($1) RETURNING id",
+        ["RADAH Project Management"]
+      );
+    }
+    const orgId = orgRes.rows[0].id;
+
     await pool.query(
-      `INSERT INTO users (email, password_hash, full_name, role, is_active)
-       VALUES ($1, $2, $3, 'admin', TRUE)`,
-      [ADMIN_EMAIL, passwordHash, ADMIN_NAME]
+      `INSERT INTO users (email, password_hash, full_name, role, is_active, org_id, is_platform_admin)
+       VALUES ($1, $2, $3, 'admin', TRUE, $4, TRUE)`,
+      [ADMIN_EMAIL, passwordHash, ADMIN_NAME, orgId]
     );
 
     console.log("[radah-pm] Admin user created:");

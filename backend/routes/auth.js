@@ -17,6 +17,8 @@ function signToken(user) {
       email: user.email,
       role: user.role,
       fullName: user.full_name,
+      orgId: user.org_id,
+      isPlatformAdmin: user.is_platform_admin === true,
     },
     JWT_SECRET,
     { expiresIn: TOKEN_EXPIRY }
@@ -31,6 +33,8 @@ function publicUser(user) {
     role: user.role,
     companyName: user.company_name,
     phone: user.phone,
+    orgId: user.org_id,
+    isPlatformAdmin: user.is_platform_admin === true,
   };
 }
 
@@ -70,48 +74,16 @@ router.post("/login", async (req, res) => {
 
 /**
  * POST /api/auth/register
- * Self-serve registration is intended for client/trade_partner accounts.
- * New admin/staff accounts should be created via the admin-only
- * /api/users endpoint instead, not this public route.
- * Body: { email, password, fullName, role, companyName, phone }
+ * DISABLED under multi-tenancy. New users are created inside an organization
+ * by an org admin (see POST /api/users). Open self-registration would create
+ * users with no tenant, which isn't allowed. A self-serve "create your own
+ * organization" signup can be added later as a deliberate feature.
  */
 router.post("/register", async (req, res) => {
-  const { email, password, fullName, role, companyName, phone } = req.body || {};
-
-  if (!email || !password || !fullName) {
-    return res.status(400).json({ error: "Name, email, and password are required." });
-  }
-  if (password.length < 8) {
-    return res.status(400).json({ error: "Password must be at least 8 characters." });
-  }
-
-  const allowedSelfRegisterRoles = ["client", "trade_partner"];
-  const finalRole = allowedSelfRegisterRoles.includes(role) ? role : "client";
-
-  try {
-    const existing = await pool.query("SELECT id FROM users WHERE email = $1", [
-      email.toLowerCase().trim(),
-    ]);
-    if (existing.rows.length > 0) {
-      return res.status(409).json({ error: "An account with this email already exists." });
-    }
-
-    const passwordHash = await bcrypt.hash(password, 12);
-
-    const result = await pool.query(
-      `INSERT INTO users (email, password_hash, full_name, role, company_name, phone)
-       VALUES ($1, $2, $3, $4::user_role, $5, $6)
-       RETURNING *`,
-      [email.toLowerCase().trim(), passwordHash, fullName, finalRole, companyName || null, phone || null]
-    );
-
-    const user = result.rows[0];
-    const token = signToken(user);
-    res.status(201).json({ token, user: publicUser(user) });
-  } catch (err) {
-    console.error("[radah-pm] register error:", err);
-    res.status(500).json({ error: "Something went wrong. Please try again." });
-  }
+  return res.status(403).json({
+    error:
+      "Self-registration is disabled. Please ask your organization's administrator to create an account for you.",
+  });
 });
 
 /**

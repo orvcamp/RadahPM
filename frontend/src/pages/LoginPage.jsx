@@ -1,7 +1,7 @@
 // src/pages/LoginPage.jsx
 
 import { useState } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 
 export default function LoginPage() {
@@ -77,7 +77,7 @@ export default function LoginPage() {
         </form>
 
         <p className="auth-switch">
-          New client or trade partner? <Link to="/register">Create an account</Link>
+          Access is by invitation. Contact your organization's administrator for an account.
         </p>
       </div>
     </div>

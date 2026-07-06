@@ -11,6 +11,7 @@ import ProjectsPage from "./pages/ProjectsPage.jsx";
 import ProjectDetailPage from "./pages/ProjectDetailPage.jsx";
 import UsersPage from "./pages/UsersPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
+import PlatformAdminPage from "./pages/PlatformAdminPage.jsx";
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -60,6 +61,7 @@ export default function App() {
           }
         />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="platform" element={<PlatformAdminPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

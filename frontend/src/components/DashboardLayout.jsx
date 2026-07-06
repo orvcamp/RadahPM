@@ -13,6 +13,7 @@ const ROLE_LABELS = {
 export default function DashboardLayout() {
   const { user, logout } = useAuth();
   const isInternal = user.role === "admin" || user.role === "staff";
+  const isPlatformAdmin = !!user.isPlatformAdmin;
 
   return (
     <div className="app-shell">
@@ -38,6 +39,11 @@ export default function DashboardLayout() {
           {isInternal && (
             <NavLink to="/users" className={({ isActive }) => (isActive ? "active" : "")}>
               Users
+            </NavLink>
+          )}
+          {isPlatformAdmin && (
+            <NavLink to="/platform" className={({ isActive }) => (isActive ? "active" : "")}>
+              Organizations
             </NavLink>
           )}
           <NavLink to="/settings" className={({ isActive }) => (isActive ? "active" : "")}>

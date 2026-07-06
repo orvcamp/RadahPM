@@ -7,15 +7,23 @@
 
 const express = require("express");
 const pool = require("../db/pool");
-const { requireAuth, requireRole, isInternal } = require("../middleware/auth");
+const { requireAuth, requireRole, isInternal, requireOrg } = require("../middleware/auth");
 
 const router = express.Router();
 
 /**
  * Throws-free helper: confirms the current user may access projectId.
- * Internal users always pass. External users must have a membership row.
+ * Strictly org-scoped: the project must belong to the user's organization.
+ * Within that org, internal users (admin/staff) see all projects; external
+ * users (client/trade_partner) need a project_members row.
+ * (Platform-admin cross-org access is a separate, later capability — not a
+ * bypass here — so this function can never leak across tenants.)
  */
 async function userCanAccessProject(user, projectId) {
+  const proj = await pool.query("SELECT org_id FROM projects WHERE id = $1", [projectId]);
+  if (proj.rows.length === 0) return false;
+  const projectOrgId = proj.rows[0].org_id;
+  if (!user.orgId || user.orgId !== projectOrgId) return false;
   if (isInternal(user)) return true;
   const result = await pool.query(
     "SELECT 1 FROM project_members WHERE project_id = $1 AND user_id = $2",
@@ -44,18 +52,21 @@ function mapProject(row) {
  * GET /api/projects
  * Admin/staff: all projects. Client/trade_partner: only their assigned projects.
  */
-router.get("/", requireAuth, async (req, res) => {
+router.get("/", requireAuth, requireOrg, async (req, res) => {
   try {
     let result;
     if (isInternal(req.user)) {
-      result = await pool.query("SELECT * FROM projects ORDER BY created_at DESC");
+      result = await pool.query(
+        "SELECT * FROM projects WHERE org_id = $1 ORDER BY created_at DESC",
+        [req.user.orgId]
+      );
     } else {
       result = await pool.query(
         `SELECT p.* FROM projects p
          JOIN project_members pm ON pm.project_id = p.id
-         WHERE pm.user_id = $1
+         WHERE pm.user_id = $1 AND p.org_id = $2
          ORDER BY p.created_at DESC`,
-        [req.user.id]
+        [req.user.id, req.user.orgId]
       );
     }
     res.json({ projects: result.rows.map(mapProject) });
@@ -70,7 +81,7 @@ router.get("/", requireAuth, async (req, res) => {
  * Admin/staff only.
  * Body: { name, description, clientOrgName, status, startDate, targetEndDate, location }
  */
-router.post("/", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+router.post("/", requireAuth, requireOrg, requireRole("admin", "staff"), async (req, res) => {
   const { name, description, clientOrgName, status, startDate, targetEndDate, location } =
     req.body || {};
 
@@ -80,8 +91,8 @@ router.post("/", requireAuth, requireRole("admin", "staff"), async (req, res) =>
 
   try {
     const result = await pool.query(
-      `INSERT INTO projects (name, description, client_org_name, status, start_date, target_end_date, location, created_by)
-       VALUES ($1, $2, $3, COALESCE($4::project_status, 'planning'::project_status), $5, $6, $7, $8)
+      `INSERT INTO projects (name, description, client_org_name, status, start_date, target_end_date, location, created_by, org_id)
+       VALUES ($1, $2, $3, COALESCE($4::project_status, 'planning'::project_status), $5, $6, $7, $8, $9)
        RETURNING *`,
       [
         name,
@@ -92,6 +103,7 @@ router.post("/", requireAuth, requireRole("admin", "staff"), async (req, res) =>
         targetEndDate || null,
         location || null,
         req.user.id,
+        req.user.orgId,
       ]
     );
     res.status(201).json({ project: mapProject(result.rows[0]) });
@@ -126,7 +138,7 @@ router.get("/:id", requireAuth, async (req, res) => {
  * PATCH /api/projects/:id
  * Admin/staff only.
  */
-router.patch("/:id", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+router.patch("/:id", requireAuth, requireOrg, requireRole("admin", "staff"), async (req, res) => {
   const fields = ["name", "description", "client_org_name", "status", "start_date", "target_end_date", "actual_end_date", "location"];
   const bodyKeyMap = {
     name: "name",
@@ -155,10 +167,13 @@ router.patch("/:id", requireAuth, requireRole("admin", "staff"), async (req, res
   }
 
   values.push(req.params.id);
+  const idIdx = i;
+  values.push(req.user.orgId);
+  const orgIdx = i + 1;
 
   try {
     const result = await pool.query(
-      `UPDATE projects SET ${updates.join(", ")} WHERE id = $${i} RETURNING *`,
+      `UPDATE projects SET ${updates.join(", ")} WHERE id = $${idIdx} AND org_id = $${orgIdx} RETURNING *`,
       values
     );
     if (result.rows.length === 0) {
@@ -175,11 +190,12 @@ router.patch("/:id", requireAuth, requireRole("admin", "staff"), async (req, res
  * DELETE /api/projects/:id
  * Admin only (more destructive than other admin/staff actions).
  */
-router.delete("/:id", requireAuth, requireRole("admin"), async (req, res) => {
+router.delete("/:id", requireAuth, requireOrg, requireRole("admin"), async (req, res) => {
   try {
-    const result = await pool.query("DELETE FROM projects WHERE id = $1 RETURNING id", [
-      req.params.id,
-    ]);
+    const result = await pool.query(
+      "DELETE FROM projects WHERE id = $1 AND org_id = $2 RETURNING id",
+      [req.params.id, req.user.orgId]
+    );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "Project not found." });
     }
@@ -234,13 +250,25 @@ router.get("/:id/members", requireAuth, async (req, res) => {
  * Admin/staff only. Adds a client or trade partner to a project.
  * Body: { userId, membershipRole }
  */
-router.post("/:id/members", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+router.post("/:id/members", requireAuth, requireOrg, requireRole("admin", "staff"), async (req, res) => {
   const { userId, membershipRole } = req.body || {};
   if (!userId) {
     return res.status(400).json({ error: "userId is required." });
   }
 
   try {
+    // The project must belong to the caller's org.
+    const proj = await pool.query("SELECT org_id FROM projects WHERE id = $1", [req.params.id]);
+    if (proj.rows.length === 0) return res.status(404).json({ error: "Project not found." });
+    if (proj.rows[0].org_id !== req.user.orgId) {
+      return res.status(403).json({ error: "You do not have access to this project." });
+    }
+    // The user being added must belong to the same org.
+    const target = await pool.query("SELECT org_id FROM users WHERE id = $1", [userId]);
+    if (target.rows.length === 0 || target.rows[0].org_id !== req.user.orgId) {
+      return res.status(400).json({ error: "That user isn't part of your organization." });
+    }
+
     const result = await pool.query(
       `INSERT INTO project_members (project_id, user_id, membership_role)
        VALUES ($1, $2, COALESCE($3::membership_role, 'viewer'::membership_role))
@@ -259,8 +287,13 @@ router.post("/:id/members", requireAuth, requireRole("admin", "staff"), async (r
  * DELETE /api/projects/:id/members/:userId
  * Admin/staff only.
  */
-router.delete("/:id/members/:userId", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+router.delete("/:id/members/:userId", requireAuth, requireOrg, requireRole("admin", "staff"), async (req, res) => {
   try {
+    const proj = await pool.query("SELECT org_id FROM projects WHERE id = $1", [req.params.id]);
+    if (proj.rows.length === 0) return res.status(404).json({ error: "Project not found." });
+    if (proj.rows[0].org_id !== req.user.orgId) {
+      return res.status(403).json({ error: "You do not have access to this project." });
+    }
     await pool.query(
       "DELETE FROM project_members WHERE project_id = $1 AND user_id = $2",
       [req.params.id, req.params.userId]

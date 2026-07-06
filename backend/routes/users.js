@@ -6,7 +6,7 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const pool = require("../db/pool");
-const { requireAuth, requireRole } = require("../middleware/auth");
+const { requireAuth, requireRole, requireOrg } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -27,12 +27,12 @@ function publicUser(user) {
  * GET /api/users
  * Admin/staff only. Optional ?role=client filter.
  */
-router.get("/", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+router.get("/", requireAuth, requireOrg, requireRole("admin", "staff"), async (req, res) => {
   const { role } = req.query;
   try {
     const result = role
-      ? await pool.query("SELECT * FROM users WHERE role = $1 ORDER BY created_at DESC", [role])
-      : await pool.query("SELECT * FROM users ORDER BY created_at DESC");
+      ? await pool.query("SELECT * FROM users WHERE org_id = $1 AND role = $2 ORDER BY created_at DESC", [req.user.orgId, role])
+      : await pool.query("SELECT * FROM users WHERE org_id = $1 ORDER BY created_at DESC", [req.user.orgId]);
     res.json({ users: result.rows.map(publicUser) });
   } catch (err) {
     console.error("[radah-pm] list users error:", err);
@@ -48,7 +48,7 @@ router.get("/", requireAuth, requireRole("admin", "staff"), async (req, res) => 
  * with the new user through a secure channel.
  * Body: { email, fullName, role, companyName, phone }
  */
-router.post("/", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+router.post("/", requireAuth, requireOrg, requireRole("admin", "staff"), async (req, res) => {
   const { email, fullName, role, companyName, phone } = req.body || {};
 
   const validRoles = ["admin", "staff", "client", "trade_partner"];
@@ -68,10 +68,10 @@ router.post("/", requireAuth, requireRole("admin", "staff"), async (req, res) =>
     const passwordHash = await bcrypt.hash(tempPassword, 12);
 
     const result = await pool.query(
-      `INSERT INTO users (email, password_hash, full_name, role, company_name, phone)
-       VALUES ($1, $2, $3, $4::user_role, $5, $6)
+      `INSERT INTO users (email, password_hash, full_name, role, company_name, phone, org_id)
+       VALUES ($1, $2, $3, $4::user_role, $5, $6, $7)
        RETURNING *`,
-      [email.toLowerCase().trim(), passwordHash, fullName, role, companyName || null, phone || null]
+      [email.toLowerCase().trim(), passwordHash, fullName, role, companyName || null, phone || null, req.user.orgId]
     );
 
     res.status(201).json({
@@ -89,11 +89,11 @@ router.post("/", requireAuth, requireRole("admin", "staff"), async (req, res) =>
  * PATCH /api/users/:id/deactivate
  * Admin/staff only.
  */
-router.patch("/:id/deactivate", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+router.patch("/:id/deactivate", requireAuth, requireOrg, requireRole("admin", "staff"), async (req, res) => {
   try {
     const result = await pool.query(
-      "UPDATE users SET is_active = FALSE WHERE id = $1 RETURNING *",
-      [req.params.id]
+      "UPDATE users SET is_active = FALSE WHERE id = $1 AND org_id = $2 RETURNING *",
+      [req.params.id, req.user.orgId]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "User not found." });
@@ -109,11 +109,11 @@ router.patch("/:id/deactivate", requireAuth, requireRole("admin", "staff"), asyn
  * PATCH /api/users/:id/reactivate
  * Admin/staff only.
  */
-router.patch("/:id/reactivate", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+router.patch("/:id/reactivate", requireAuth, requireOrg, requireRole("admin", "staff"), async (req, res) => {
   try {
     const result = await pool.query(
-      "UPDATE users SET is_active = TRUE WHERE id = $1 RETURNING *",
-      [req.params.id]
+      "UPDATE users SET is_active = TRUE WHERE id = $1 AND org_id = $2 RETURNING *",
+      [req.params.id, req.user.orgId]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "User not found." });
@@ -132,9 +132,9 @@ router.patch("/:id/reactivate", requireAuth, requireRole("admin", "staff"), asyn
  * way account creation does — there is no email delivery in Phase 1, so
  * the admin must share it with the user through a secure channel.
  */
-router.post("/:id/reset-password", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+router.post("/:id/reset-password", requireAuth, requireOrg, requireRole("admin", "staff"), async (req, res) => {
   try {
-    const existing = await pool.query("SELECT id FROM users WHERE id = $1", [req.params.id]);
+    const existing = await pool.query("SELECT id FROM users WHERE id = $1 AND org_id = $2", [req.params.id, req.user.orgId]);
     if (existing.rows.length === 0) {
       return res.status(404).json({ error: "User not found." });
     }

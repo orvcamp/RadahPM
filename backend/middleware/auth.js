@@ -48,9 +48,33 @@ function requireRole(...allowedRoles) {
   };
 }
 
-/** True if the user's platform role is admin or staff (full project visibility). */
+/** True if the user's platform role is admin or staff (full visibility WITHIN their org). */
 function isInternal(user) {
   return user && (user.role === "admin" || user.role === "staff");
 }
 
-module.exports = { requireAuth, requireRole, isInternal, JWT_SECRET };
+/** True if the user is a platform (super) admin — the only role that may cross orgs. */
+function isPlatformAdmin(user) {
+  return !!(user && user.isPlatformAdmin);
+}
+
+/** Restricts a route to platform (super) admins. */
+function requirePlatformAdmin(req, res, next) {
+  if (!req.user || !req.user.isPlatformAdmin) {
+    return res.status(403).json({ error: "Platform administrator access required." });
+  }
+  next();
+}
+
+/**
+ * Ensures the authenticated user carries an organization context. Tokens
+ * issued before multi-tenancy don't have orgId; those users must re-login.
+ */
+function requireOrg(req, res, next) {
+  if (!req.user || !req.user.orgId) {
+    return res.status(401).json({ error: "Your session predates a security update. Please log out and log in again." });
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireRole, isInternal, isPlatformAdmin, requireOrg, requirePlatformAdmin, JWT_SECRET };
