@@ -19,11 +19,40 @@
 //   - trade_partner: no access (403), tab hidden in UI.
 
 const express = require("express");
+const crypto = require("crypto");
 const pool = require("../db/pool");
 const { requireAuth, requireRole, isInternal } = require("../middleware/auth");
 const { userCanAccessProject } = require("./projects");
+const r2 = require("../db/r2");
 
 const router = express.Router();
+
+function requireR2(req, res, next) {
+  if (!r2.isConfigured) {
+    return res.status(503).json({ error: "File storage is not configured yet. Please contact your administrator." });
+  }
+  next();
+}
+
+function buildStorageKey(projectId, fileName) {
+  const safeName = (fileName || "file").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
+  return `projects/${projectId}/${crypto.randomUUID()}-${safeName}`;
+}
+
+// Can this user attach files to change orders on this project?
+// Internal always; a client who is a project member; never trade partners.
+async function canAttachCO(user, projectId) {
+  if (user.role === "trade_partner") return false;
+  if (isInternal(user)) return true;
+  if (user.role === "client") {
+    const r = await pool.query(
+      "SELECT 1 FROM project_members WHERE project_id = $1 AND user_id = $2",
+      [projectId, user.id]
+    );
+    return r.rows.length > 0;
+  }
+  return false;
+}
 
 // Signed cents (allows negative for credits). Returns null if invalid.
 function normalizeSignedCents(value) {
@@ -105,11 +134,39 @@ router.get("/projects/:projectId/change-orders", requireAuth, async (req, res) =
         [req.params.projectId]
       ),
     ]);
+
+    // Attachments for all these COs, grouped by change_order_id.
+    const coIds = cosRes.rows.map((r) => r.id);
+    const attachRes = await pool.query(
+      `SELECT cod.id, cod.change_order_id, cod.document_id, d.file_name, d.uploaded_by
+         FROM change_order_documents cod
+         JOIN documents d ON d.id = cod.document_id
+        WHERE cod.change_order_id = ANY($1::uuid[])
+        ORDER BY cod.created_at ASC`,
+      [coIds]
+    );
+    const attachmentsByCO = {};
+    for (const a of attachRes.rows) {
+      (attachmentsByCO[a.change_order_id] = attachmentsByCO[a.change_order_id] || []).push({
+        id: a.id,
+        documentId: a.document_id,
+        fileName: a.file_name,
+        canDelete: isInternal(req.user) || a.uploaded_by === req.user.id,
+      });
+    }
+
+    const changeOrders = cosRes.rows.map((row) => {
+      const co = mapChangeOrder(row);
+      co.attachments = attachmentsByCO[co.id] || [];
+      return co;
+    });
+
     res.json({
       canManage: isInternal(req.user),
       canDecide: true, // both internal users and project-member clients may decide submitted COs
+      canAttach: await canAttachCO(req.user, req.params.projectId),
       categories: catsRes.rows.map((r) => ({ id: r.id, name: r.name })),
-      changeOrders: cosRes.rows.map(mapChangeOrder),
+      changeOrders,
     });
   } catch (err) {
     console.error("[radah-pm] list change orders error:", err);
@@ -404,5 +461,124 @@ router.delete(
     }
   }
 );
+
+// ============================================================
+// ATTACHMENTS (supporting docs) — reuse the Documents R2 pipeline.
+// admin/staff or a project-member client may attach; trade partners cannot.
+// Attachments are also normal project documents.
+// ============================================================
+
+// POST /api/projects/:projectId/change-orders/:coId/attachments/upload-url
+router.post(
+  "/projects/:projectId/change-orders/:coId/attachments/upload-url",
+  requireAuth,
+  requireR2,
+  async (req, res) => {
+    try {
+      const co = await pool.query(
+        "SELECT id, project_id FROM change_orders WHERE id = $1",
+        [req.params.coId]
+      );
+      if (!co.rows[0] || co.rows[0].project_id !== req.params.projectId) {
+        return res.status(404).json({ error: "Change order not found." });
+      }
+      if (!(await canAttachCO(req.user, req.params.projectId))) {
+        return res.status(403).json({ error: "You can't attach files to change orders on this project." });
+      }
+      const { fileName, contentType } = req.body || {};
+      if (!fileName) return res.status(400).json({ error: "fileName is required." });
+      const storageKey = buildStorageKey(req.params.projectId, fileName);
+      const uploadUrl = await r2.getUploadUrl(storageKey, contentType);
+      res.json({ uploadUrl, storageKey });
+    } catch (err) {
+      console.error("[radah-pm] CO attachment upload-url error:", err);
+      res.status(500).json({ error: "Could not prepare the upload. Please try again." });
+    }
+  }
+);
+
+// POST /api/projects/:projectId/change-orders/:coId/attachments/confirm
+router.post(
+  "/projects/:projectId/change-orders/:coId/attachments/confirm",
+  requireAuth,
+  requireR2,
+  async (req, res) => {
+    const { storageKey, fileName, contentType, sizeBytes } = req.body || {};
+    if (!storageKey || !fileName) {
+      return res.status(400).json({ error: "storageKey and fileName are required." });
+    }
+    if (!storageKey.startsWith(`projects/${req.params.projectId}/`)) {
+      return res.status(400).json({ error: "Invalid storage key for this project." });
+    }
+    const client = await pool.connect();
+    try {
+      const co = await pool.query(
+        "SELECT id, project_id FROM change_orders WHERE id = $1",
+        [req.params.coId]
+      );
+      if (!co.rows[0] || co.rows[0].project_id !== req.params.projectId) {
+        client.release();
+        return res.status(404).json({ error: "Change order not found." });
+      }
+      if (!(await canAttachCO(req.user, req.params.projectId))) {
+        client.release();
+        return res.status(403).json({ error: "You can't attach files to change orders on this project." });
+      }
+
+      await client.query("BEGIN");
+      const docRes = await client.query(
+        `INSERT INTO documents (project_id, storage_key, file_name, content_type, size_bytes, description, uploaded_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        [
+          req.params.projectId,
+          storageKey,
+          fileName,
+          contentType || null,
+          sizeBytes || null,
+          `Change order attachment`,
+          req.user.id,
+        ]
+      );
+      const documentId = docRes.rows[0].id;
+      const linkRes = await client.query(
+        `INSERT INTO change_order_documents (change_order_id, document_id) VALUES ($1, $2) RETURNING id`,
+        [req.params.coId, documentId]
+      );
+      await client.query("COMMIT");
+      res.status(201).json({
+        attachment: { id: linkRes.rows[0].id, documentId, fileName, canDelete: true },
+      });
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("[radah-pm] CO attachment confirm error:", err);
+      res.status(500).json({ error: "Could not save the attachment." });
+    } finally {
+      client.release();
+    }
+  }
+);
+
+// DELETE /api/change-order-documents/:id — uploader or admin/staff (detach only).
+router.delete("/change-order-documents/:id", requireAuth, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT cod.id, d.uploaded_by, d.project_id
+         FROM change_order_documents cod JOIN documents d ON d.id = cod.document_id
+        WHERE cod.id = $1`,
+      [req.params.id]
+    );
+    const link = r.rows[0];
+    if (!link) return res.status(404).json({ error: "Attachment not found." });
+    const canDelete = isInternal(req.user) || link.uploaded_by === req.user.id;
+    if (!canDelete) {
+      return res.status(403).json({ error: "Only the uploader or RADAH staff can remove this attachment." });
+    }
+    await pool.query("DELETE FROM change_order_documents WHERE id = $1", [req.params.id]);
+    res.json({ message: "Attachment removed." });
+  } catch (err) {
+    console.error("[radah-pm] delete CO attachment error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
 
 module.exports = router;

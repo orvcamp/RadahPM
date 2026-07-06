@@ -5,7 +5,7 @@
 // reject SUBMITTED change orders. Approving creates a budget line in the
 // Budget tab (visible there). trade_partner never sees this tab.
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext.jsx";
 
@@ -131,12 +131,99 @@ function ChangeOrderModal({ projectId, categories, changeOrder, onClose, onSaved
   );
 }
 
+// ---------- attachments modal ----------
+function AttachmentsModal({ projectId, changeOrder, canAttach, onClose, onChanged }) {
+  const fileRef = useRef(null);
+  const [attachments, setAttachments] = useState(changeOrder.attachments || []);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function download(a) {
+    try {
+      const { downloadUrl } = await api.get(`/documents/${a.documentId}/download-url`);
+      window.open(downloadUrl, "_blank");
+    } catch (err) { alert(err.message); }
+  }
+
+  async function onFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setError("");
+    setUploading(true);
+    try {
+      const ct = file.type || "application/octet-stream";
+      const { uploadUrl, storageKey } = await api.post(
+        `/projects/${projectId}/change-orders/${changeOrder.id}/attachments/upload-url`,
+        { fileName: file.name, contentType: ct }
+      );
+      const put = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": ct }, body: file });
+      if (!put.ok) throw new Error("Upload to storage failed.");
+      const { attachment } = await api.post(
+        `/projects/${projectId}/change-orders/${changeOrder.id}/attachments/confirm`,
+        { storageKey, fileName: file.name, contentType: ct, sizeBytes: file.size }
+      );
+      setAttachments((prev) => [...prev, attachment]);
+      onChanged && onChanged();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function remove(a) {
+    if (!confirm(`Remove "${a.fileName}"?`)) return;
+    try {
+      await api.delete(`/change-order-documents/${a.id}`);
+      setAttachments((prev) => prev.filter((x) => x.id !== a.id));
+      onChanged && onChanged();
+    } catch (err) { alert(err.message); }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3 style={{ fontSize: "1.05rem", textTransform: "uppercase" }}>CO #{changeOrder.coNumber} — Attachments</h3>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+        {error && <div className="error-msg">{error}</div>}
+        {attachments.length === 0 ? (
+          <p className="text-sm text-steel" style={{ marginBottom: "1rem" }}>No attachments yet.</p>
+        ) : (
+          <div style={{ marginBottom: "1rem" }}>
+            {attachments.map((a) => (
+              <div key={a.id} className="flex-between" style={{ padding: "0.45rem 0", borderBottom: "1px solid var(--line)", gap: "0.5rem" }}>
+                <span style={{ fontSize: "0.86rem" }}>{a.fileName}</span>
+                <div style={{ display: "flex", gap: "0.4rem" }}>
+                  <button className="btn btn-outline btn-sm" onClick={() => download(a)}>Download</button>
+                  {a.canDelete && <button className="btn btn-danger btn-sm" onClick={() => remove(a)}>×</button>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {canAttach && (
+          <>
+            <input ref={fileRef} type="file" style={{ display: "none" }} onChange={onFile} />
+            <button className="btn btn-outline btn-sm" disabled={uploading} onClick={() => fileRef.current?.click()}>
+              {uploading ? "Uploading…" : "+ Add File"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ChangeOrdersTab({ projectId }) {
   const { user } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [modal, setModal] = useState(null); // null | {} | changeOrder
+  const [attachModal, setAttachModal] = useState(null); // null | changeOrder
   const [busyId, setBusyId] = useState(null);
 
   const load = useCallback(async () => {
@@ -184,7 +271,7 @@ export default function ChangeOrdersTab({ projectId }) {
   if (error) return <div className="error-msg">{error}</div>;
   if (!data) return null;
 
-  const { canManage, categories, changeOrders } = data;
+  const { canManage, categories, changeOrders, canAttach } = data;
   const isClient = user.role === "client";
 
   return (
@@ -237,6 +324,9 @@ export default function ChangeOrdersTab({ projectId }) {
                     </td>
                     <td>
                       <div style={{ display: "flex", gap: "0.4rem", justifyContent: "flex-end", flexWrap: "wrap" }}>
+                        <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => setAttachModal(co)}>
+                          📎 Files{co.attachments && co.attachments.length ? ` (${co.attachments.length})` : ""}
+                        </button>
                         {canDecide && (
                           <>
                             <button className="btn btn-gold btn-sm" disabled={busy} onClick={() => transition(co, "approve")}>Approve</button>
@@ -272,6 +362,16 @@ export default function ChangeOrdersTab({ projectId }) {
           changeOrder={modal.id ? modal : null}
           onClose={() => setModal(null)}
           onSaved={() => { setModal(null); load(); }}
+        />
+      )}
+
+      {attachModal !== null && (
+        <AttachmentsModal
+          projectId={projectId}
+          changeOrder={attachModal}
+          canAttach={canAttach}
+          onClose={() => setAttachModal(null)}
+          onChanged={() => load()}
         />
       )}
     </div>

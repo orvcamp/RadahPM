@@ -37,6 +37,7 @@ function mapDocument(row) {
     description: row.description,
     uploadedBy: row.uploaded_by,
     uploadedByName: row.uploaded_by_name || null,
+    folderId: row.folder_id || null,
     createdAt: row.created_at,
   };
 }
@@ -125,7 +126,7 @@ router.post(
   requireAuth,
   requireR2,
   async (req, res) => {
-    const { storageKey, fileName, contentType, sizeBytes, description } = req.body || {};
+    const { storageKey, fileName, contentType, sizeBytes, description, folderId } = req.body || {};
     if (!storageKey || !fileName) {
       return res.status(400).json({ error: "storageKey and fileName are required." });
     }
@@ -139,9 +140,19 @@ router.post(
       if (!allowed) {
         return res.status(403).json({ error: "You do not have access to this project." });
       }
+      // If a folder was given, confirm it belongs to this project.
+      if (folderId) {
+        const f = await pool.query(
+          "SELECT 1 FROM document_folders WHERE id = $1 AND project_id = $2",
+          [folderId, req.params.projectId]
+        );
+        if (f.rows.length === 0) {
+          return res.status(400).json({ error: "That folder doesn't belong to this project." });
+        }
+      }
       const result = await pool.query(
-        `INSERT INTO documents (project_id, storage_key, file_name, content_type, size_bytes, description, uploaded_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO documents (project_id, storage_key, file_name, content_type, size_bytes, description, uploaded_by, folder_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING *`,
         [
           req.params.projectId,
@@ -151,6 +162,7 @@ router.post(
           sizeBytes || null,
           description || null,
           req.user.id,
+          folderId || null,
         ]
       );
       // Re-fetch with uploader name for a consistent response shape.
@@ -223,6 +235,207 @@ router.delete("/documents/:id", requireAuth, requireR2, async (req, res) => {
     res.json({ message: "Document deleted." });
   } catch (err) {
     console.error("[radah-pm] delete document error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
+// ============================================================
+// FOLDERS (nested). Folder management is admin/staff; any member may
+// move their own uploads. Deleting a folder re-parents its contents up
+// one level (never deletes files).
+// ============================================================
+
+function mapFolder(row) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    parentFolderId: row.parent_folder_id || null,
+    name: row.name,
+    createdAt: row.created_at,
+  };
+}
+
+// Collect a folder plus all its descendant folder ids (for loop prevention).
+async function collectDescendantIds(folderId) {
+  const ids = new Set([folderId]);
+  let frontier = [folderId];
+  while (frontier.length) {
+    const r = await pool.query(
+      "SELECT id FROM document_folders WHERE parent_folder_id = ANY($1::uuid[])",
+      [frontier]
+    );
+    frontier = [];
+    for (const row of r.rows) {
+      if (!ids.has(row.id)) { ids.add(row.id); frontier.push(row.id); }
+    }
+  }
+  return ids;
+}
+
+// GET /api/projects/:projectId/folders — flat list; the client builds the tree.
+router.get("/projects/:projectId/folders", requireAuth, async (req, res) => {
+  try {
+    const allowed = await userCanAccessProject(req.user, req.params.projectId);
+    if (!allowed) return res.status(403).json({ error: "You do not have access to this project." });
+    const r = await pool.query(
+      "SELECT * FROM document_folders WHERE project_id = $1 ORDER BY name ASC",
+      [req.params.projectId]
+    );
+    res.json({ folders: r.rows.map(mapFolder) });
+  } catch (err) {
+    console.error("[radah-pm] list folders error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
+// POST /api/projects/:projectId/folders  { name, parentFolderId }  (admin/staff)
+router.post(
+  "/projects/:projectId/folders",
+  requireAuth,
+  requireRole("admin", "staff"),
+  async (req, res) => {
+    const { name, parentFolderId } = req.body || {};
+    if (!name || !name.trim()) return res.status(400).json({ error: "Folder name is required." });
+    try {
+      if (parentFolderId) {
+        const p = await pool.query(
+          "SELECT 1 FROM document_folders WHERE id = $1 AND project_id = $2",
+          [parentFolderId, req.params.projectId]
+        );
+        if (p.rows.length === 0) {
+          return res.status(400).json({ error: "The parent folder doesn't belong to this project." });
+        }
+      }
+      const r = await pool.query(
+        `INSERT INTO document_folders (project_id, parent_folder_id, name, created_by)
+         VALUES ($1, $2, $3, $4) RETURNING *`,
+        [req.params.projectId, parentFolderId || null, name.trim(), req.user.id]
+      );
+      res.status(201).json({ folder: mapFolder(r.rows[0]) });
+    } catch (err) {
+      console.error("[radah-pm] create folder error:", err);
+      res.status(500).json({ error: "Something went wrong." });
+    }
+  }
+);
+
+// PATCH /api/folders/:id  { name, parentFolderId }  (admin/staff) — rename / move
+router.patch("/folders/:id", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+  try {
+    const cur = await pool.query("SELECT * FROM document_folders WHERE id = $1", [req.params.id]);
+    const folder = cur.rows[0];
+    if (!folder) return res.status(404).json({ error: "Folder not found." });
+
+    const updates = [];
+    const values = [];
+    let i = 1;
+
+    if (req.body.name !== undefined) {
+      if (!String(req.body.name).trim()) return res.status(400).json({ error: "Folder name cannot be empty." });
+      updates.push(`name = $${i}`); values.push(String(req.body.name).trim()); i++;
+    }
+    if (req.body.parentFolderId !== undefined) {
+      const newParent = req.body.parentFolderId || null;
+      if (newParent) {
+        // Must be in the same project, and not the folder itself or a descendant.
+        const p = await pool.query(
+          "SELECT 1 FROM document_folders WHERE id = $1 AND project_id = $2",
+          [newParent, folder.project_id]
+        );
+        if (p.rows.length === 0) {
+          return res.status(400).json({ error: "The target folder doesn't belong to this project." });
+        }
+        const descendants = await collectDescendantIds(folder.id);
+        if (descendants.has(newParent)) {
+          return res.status(400).json({ error: "You can't move a folder into itself or one of its subfolders." });
+        }
+      }
+      updates.push(`parent_folder_id = $${i}`); values.push(newParent); i++;
+    }
+
+    if (updates.length === 0) return res.status(400).json({ error: "No valid fields provided to update." });
+    values.push(req.params.id);
+    const r = await pool.query(
+      `UPDATE document_folders SET ${updates.join(", ")} WHERE id = $${i} RETURNING *`,
+      values
+    );
+    res.json({ folder: mapFolder(r.rows[0]) });
+  } catch (err) {
+    console.error("[radah-pm] update folder error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
+// DELETE /api/folders/:id  (admin/staff)
+// Re-parents child folders and documents up to this folder's parent, then
+// deletes the now-empty folder. No files are lost.
+router.delete("/folders/:id", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const cur = await client.query("SELECT * FROM document_folders WHERE id = $1", [req.params.id]);
+    const folder = cur.rows[0];
+    if (!folder) { client.release(); return res.status(404).json({ error: "Folder not found." }); }
+
+    await client.query("BEGIN");
+    // Move child folders up to this folder's parent.
+    await client.query(
+      "UPDATE document_folders SET parent_folder_id = $1 WHERE parent_folder_id = $2",
+      [folder.parent_folder_id, folder.id]
+    );
+    // Move documents up to this folder's parent.
+    await client.query(
+      "UPDATE documents SET folder_id = $1 WHERE folder_id = $2",
+      [folder.parent_folder_id, folder.id]
+    );
+    await client.query("DELETE FROM document_folders WHERE id = $1", [folder.id]);
+    await client.query("COMMIT");
+    res.json({ message: "Folder deleted; its contents moved up one level." });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("[radah-pm] delete folder error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  } finally {
+    client.release();
+  }
+});
+
+// PATCH /api/documents/:id  { folderId }  — move a document into a folder.
+// Uploader or admin/staff.
+router.patch("/documents/:id", requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM documents WHERE id = $1", [req.params.id]);
+    const doc = result.rows[0];
+    if (!doc) return res.status(404).json({ error: "Document not found." });
+    const allowed = await userCanAccessProject(req.user, doc.project_id);
+    if (!allowed) return res.status(403).json({ error: "You do not have access to this document." });
+    const canMove = isInternal(req.user) || doc.uploaded_by === req.user.id;
+    if (!canMove) return res.status(403).json({ error: "Only the uploader or RADAH staff can move this document." });
+
+    if (req.body.folderId === undefined) {
+      return res.status(400).json({ error: "No folder provided." });
+    }
+    const folderId = req.body.folderId || null;
+    if (folderId) {
+      const f = await pool.query(
+        "SELECT 1 FROM document_folders WHERE id = $1 AND project_id = $2",
+        [folderId, doc.project_id]
+      );
+      if (f.rows.length === 0) {
+        return res.status(400).json({ error: "That folder doesn't belong to this project." });
+      }
+    }
+    const upd = await pool.query(
+      `UPDATE documents SET folder_id = $1 WHERE id = $2 RETURNING *`,
+      [folderId, req.params.id]
+    );
+    const withName = await pool.query(
+      `SELECT d.*, u.full_name AS uploaded_by_name FROM documents d
+       LEFT JOIN users u ON u.id = d.uploaded_by WHERE d.id = $1`,
+      [upd.rows[0].id]
+    );
+    res.json({ document: mapDocument(withName.rows[0]) });
+  } catch (err) {
+    console.error("[radah-pm] move document error:", err);
     res.status(500).json({ error: "Something went wrong." });
   }
 });

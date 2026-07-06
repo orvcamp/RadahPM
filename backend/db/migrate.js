@@ -33,6 +33,8 @@ async function migrate() {
     await runSqlFile("migrations_phase2_budgets.sql", "Phase 2 migration (budgets)");
     await runSqlFile("migrations_phase2_changeorders.sql", "Phase 2 migration (change orders)");
     await runSqlFile("migrations_phase2_dailylogs.sql", "Phase 2 migration (daily logs)");
+    await runSqlFile("migrations_phase2_folders.sql", "Migration (document folders)");
+    await runSqlFile("migrations_phase2_co_attachments.sql", "Migration (change order attachments)");
   } finally {
     await pool.end();
   }
