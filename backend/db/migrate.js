@@ -30,6 +30,7 @@ async function migrate() {
   try {
     await runSqlFile("schema.sql", "Phase 1 schema migration");
     await runSqlFile("migrations_phase2.sql", "Phase 2 migration (documents)");
+    await runSqlFile("migrations_phase2_budgets.sql", "Phase 2 migration (budgets)");
   } finally {
     await pool.end();
   }
