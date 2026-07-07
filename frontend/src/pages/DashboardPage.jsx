@@ -70,7 +70,7 @@ export default function DashboardPage() {
                 <p className="text-sm">
                   {user.role === "admin" || user.role === "staff"
                     ? "Create your first project to get started."
-                    : "You haven't been added to any projects yet. Contact RADAH if you believe this is an error."}
+                    : "You haven't been added to any projects yet. Contact your administrator if you believe this is an error."}
                 </p>
               </div>
             ) : (

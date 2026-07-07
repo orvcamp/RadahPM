@@ -121,7 +121,7 @@ export default function ProjectsPage() {
       <div className="page-header">
         <div>
           <h1>Projects</h1>
-          <p>{isInternal ? "All projects across RADAH's portfolio." : "Projects you have access to."}</p>
+          <p>{isInternal ? "All projects across your organization." : "Projects you have access to."}</p>
         </div>
         {isInternal && (
           <button className="btn btn-gold" onClick={() => setShowNew(true)}>+ New Project</button>

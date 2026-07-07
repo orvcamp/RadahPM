@@ -2,6 +2,7 @@
 
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
+import { APP_NAME, APP_TAGLINE } from "../config.js";
 
 const ROLE_LABELS = {
   admin: "Administrator",
@@ -24,8 +25,8 @@ export default function DashboardLayout() {
             <path d="M9 24L17 8L21 16H25L17 27L13 19H9" stroke="#3DBA6E" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
           </svg>
           <div>
-            <span className="name">RADAH</span>
-            <span className="sub">PM Platform</span>
+            <span className="name">{APP_NAME}</span>
+            <span className="sub">{APP_TAGLINE}</span>
           </div>
         </div>
 

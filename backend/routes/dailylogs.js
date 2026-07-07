@@ -19,6 +19,7 @@ const { requireAuth, isInternal } = require("../middleware/auth");
 const { userCanAccessProject, resourceProjectId } = require("./projects");
 const r2 = require("../db/r2");
 const mail = require("../mail");
+const APP_NAME = process.env.APP_NAME || "MangoDoe";
 const { requireModule } = require("../orgModules");
 
 const router = express.Router();
@@ -496,7 +497,7 @@ router.post(
           </table>
           ${photosHtml}
           <hr style="border:none;border-top:1px solid #E2E1DA;margin:20px 0;">
-          <p style="font-size:12px;color:#9ca3af;">Sent by ${esc(senderName)} via the RADAH PM platform.</p>
+          <p style="font-size:12px;color:#9ca3af;">Sent by ${esc(senderName)} via ${APP_NAME}.</p>
         </div>`;
 
       await mail.send({

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
+import { APP_NAME } from "../config.js";
 
 export default function LoginPage() {
   const { login, user } = useAuth();
@@ -40,7 +41,7 @@ export default function LoginPage() {
             <rect x="1" y="1" width="32" height="32" rx="3" stroke="#C9A227" strokeWidth="1.5" />
             <path d="M9 24L17 8L21 16H25L17 27L13 19H9" stroke="#3DBA6E" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
           </svg>
-          <span className="name">RADAH PM</span>
+          <span className="name">{APP_NAME}</span>
         </div>
 
         <h2>Sign In</h2>
