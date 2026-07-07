@@ -460,4 +460,65 @@ router.patch("/documents/:id", requireAuth, async (req, res) => {
   }
 });
 
+// ============================================================
+// STANDARD FOLDER TEMPLATE (construction-industry structure)
+// POST /api/projects/:projectId/folders/apply-template  (admin/staff)
+// Idempotent: find-or-create by name at each level, so re-running won't
+// duplicate. Great for setting up a new project's filing structure at once.
+// ============================================================
+const FOLDER_TEMPLATE = [
+  { name: "00 - Project Management", children: ["Contacts & Directory", "Meeting Minutes", "Correspondence", "Schedules"] },
+  { name: "01 - Preconstruction & Contracts", children: ["Contracts & Agreements", "Bonds & Insurance", "Permits & Approvals", "Proposals & Estimates"] },
+  { name: "02 - Drawings & Specifications", children: ["Contract Drawings (For Construction)", "Shop Drawings", "As-Builts", "Specifications", "Superseded"] },
+  { name: "03 - Submittals", children: [] },
+  { name: "04 - RFIs", children: [] },
+  { name: "05 - Change Management", children: ["Change Orders", "Potential Change Orders (PCOs)", "Construction Change Directives"] },
+  { name: "06 - Cost & Billing", children: ["Budget", "Pay Applications", "Invoices", "Lien Waivers"] },
+  { name: "07 - Field & Logs", children: ["Daily Logs", "Site Photos", "Delivery Logs", "Visitor Logs", "Equipment Logs", "Weather Logs"] },
+  { name: "08 - Safety", children: ["Safety Plans", "Incident Reports", "Toolbox Talks & JHAs", "Safety Inspections"] },
+  { name: "09 - Quality (QA-QC)", children: ["Inspection Reports", "Test Reports", "Punch Lists", "Deficiency Logs"] },
+  { name: "10 - Closeout", children: ["Warranties", "O&M Manuals", "As-Built Record Set", "Final Certificates & Permits", "Training"] },
+];
+
+router.post(
+  "/projects/:projectId/folders/apply-template",
+  requireAuth,
+  requireModule("documents"),
+  requireRole("admin", "staff"),
+  guardProject,
+  async (req, res) => {
+    const projectId = req.params.projectId;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      let created = 0;
+      async function findOrCreate(name, parentId) {
+        const found = await client.query(
+          "SELECT id FROM document_folders WHERE project_id = $1 AND name = $2 AND parent_folder_id IS NOT DISTINCT FROM $3",
+          [projectId, name, parentId]
+        );
+        if (found.rows[0]) return found.rows[0].id;
+        const ins = await client.query(
+          "INSERT INTO document_folders (project_id, parent_folder_id, name, created_by) VALUES ($1, $2, $3, $4) RETURNING id",
+          [projectId, parentId, name, req.user.id]
+        );
+        created++;
+        return ins.rows[0].id;
+      }
+      for (const top of FOLDER_TEMPLATE) {
+        const topId = await findOrCreate(top.name, null);
+        for (const child of top.children) await findOrCreate(child, topId);
+      }
+      await client.query("COMMIT");
+      res.json({ message: `Standard folder structure applied. ${created} new folder(s) created.`, created });
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("[radah-pm] apply folder template error:", err);
+      res.status(500).json({ error: "Something went wrong applying the template." });
+    } finally {
+      client.release();
+    }
+  }
+);
+
 module.exports = router;

@@ -82,6 +82,21 @@ export default function DocumentsTab({ projectId }) {
   const [newFolderName, setNewFolderName] = useState("");
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [moveDoc, setMoveDoc] = useState(null);
+  const [applying, setApplying] = useState(false);
+
+  async function applyTemplate() {
+    if (!confirm("Add the standard construction folder structure to this project? Folders that already exist are left as-is.")) return;
+    setApplying(true);
+    try {
+      const r = await api.post(`/projects/${projectId}/folders/apply-template`, {});
+      await load();
+      alert(r.message);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setApplying(false);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -202,6 +217,11 @@ export default function DocumentsTab({ projectId }) {
       <div className="flex-between" style={{ marginBottom: "1rem", flexWrap: "wrap", gap: "0.6rem" }}>
         <h3 style={{ fontSize: "1rem", textTransform: "uppercase" }}>Project Documents</h3>
         <div style={{ display: "flex", gap: "0.5rem" }}>
+          {isInternal && (
+            <button className="btn btn-outline btn-sm" onClick={applyTemplate} disabled={applying || uploading}>
+              {applying ? "Setting up…" : "Set Up Standard Folders"}
+            </button>
+          )}
           {isInternal && (
             <button className="btn btn-outline btn-sm" onClick={() => setShowNewFolder((s) => !s)} disabled={uploading}>+ New Folder</button>
           )}
