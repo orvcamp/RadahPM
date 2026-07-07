@@ -18,6 +18,7 @@ const pool = require("../db/pool");
 const { requireAuth, isInternal } = require("../middleware/auth");
 const { userCanAccessProject, resourceProjectId } = require("./projects");
 const r2 = require("../db/r2");
+const mail = require("../mail");
 
 const router = express.Router();
 
@@ -411,5 +412,108 @@ router.delete("/daily-log-photos/:id", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Something went wrong." });
   }
 });
+
+// ============================================================
+// EMAIL A DAILY LOG TO RECIPIENTS
+// POST /api/projects/:projectId/daily-logs/:logId/email
+// Any project member (guardProject enforces org + project access).
+// Body: { recipients: string[], note?: string }
+// ============================================================
+router.post(
+  "/projects/:projectId/daily-logs/:logId/email",
+  requireAuth,
+  guardProject,
+  async (req, res) => {
+    if (!mail.isConfigured) {
+      return res.status(503).json({ error: "Email is not set up on the server yet. Please contact your administrator." });
+    }
+    const { recipients, note } = req.body || {};
+    const list = Array.isArray(recipients)
+      ? recipients.map((e) => String(e).trim()).filter((e) => e)
+      : [];
+    const valid = list.filter((e) => mail.isValidEmail(e));
+    if (valid.length === 0) {
+      return res.status(400).json({ error: "Please provide at least one valid recipient email." });
+    }
+    if (valid.length > 25) {
+      return res.status(400).json({ error: "Too many recipients (max 25)." });
+    }
+
+    try {
+      // Load the log (must belong to this project) with author + project name.
+      const logRes = await pool.query(
+        `SELECT dl.*, u.full_name AS created_by_name, p.name AS project_name
+           FROM daily_logs dl
+           LEFT JOIN users u ON u.id = dl.created_by
+           JOIN projects p ON p.id = dl.project_id
+          WHERE dl.id = $1 AND dl.project_id = $2`,
+        [req.params.logId, req.params.projectId]
+      );
+      const log = logRes.rows[0];
+      if (!log) return res.status(404).json({ error: "Daily log not found." });
+
+      // Photos → short-lived view links.
+      const photoRes = await pool.query(
+        `SELECT d.storage_key, d.file_name
+           FROM daily_log_photos p JOIN documents d ON d.id = p.document_id
+          WHERE p.daily_log_id = $1`,
+        [req.params.logId]
+      );
+      const photoLinks = [];
+      for (const ph of photoRes.rows) {
+        if (r2.isConfigured) {
+          try { photoLinks.push({ name: ph.file_name, url: await r2.getDownloadUrl(ph.storage_key, ph.file_name) }); }
+          catch { /* skip a broken link */ }
+        }
+      }
+
+      const esc = mail.escapeHtml;
+      const dateStr = new Date(log.log_date).toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+      const row = (label, val) =>
+        val ? `<tr><td style="padding:6px 12px 6px 0;color:#6b7280;vertical-align:top;white-space:nowrap;">${esc(label)}</td><td style="padding:6px 0;">${esc(val).replace(/\n/g, "<br>")}</td></tr>` : "";
+
+      const senderName = req.user.fullName || req.user.email;
+      const noteHtml = note && String(note).trim()
+        ? `<p style="margin:0 0 16px;padding:12px;background:#f7f6f2;border-left:3px solid #C9A227;">${esc(note).replace(/\n/g, "<br>")}</p>`
+        : "";
+      const photosHtml = photoLinks.length
+        ? `<p style="margin:16px 0 6px;color:#6b7280;">Photos:</p><ul style="margin:0 0 16px;padding-left:18px;">${photoLinks.map((p) => `<li><a href="${p.url}">${esc(p.name)}</a></li>`).join("")}</ul><p style="font-size:12px;color:#9ca3af;">Photo links expire after a short time.</p>`
+        : "";
+
+      const html = `
+        <div style="font-family:Arial,Helvetica,sans-serif;color:#0B1F3A;max-width:640px;margin:0 auto;">
+          <h2 style="margin:0 0 4px;">Daily Log — ${esc(log.project_name)}</h2>
+          <p style="margin:0 0 16px;color:#6b7280;">${esc(dateStr)}${log.created_by_name ? " · logged by " + esc(log.created_by_name) : ""}</p>
+          ${noteHtml}
+          <table style="border-collapse:collapse;font-size:14px;">
+            ${row("Weather", [log.weather, log.temperature].filter(Boolean).join(", "))}
+            ${row("Crew / Manpower", log.crew_count != null ? String(log.crew_count) : "")}
+            ${row("Work Performed", log.work_performed)}
+            ${row("Equipment On Site", log.equipment)}
+            ${row("Delays / Issues", log.delays)}
+            ${row("Notes", log.notes)}
+          </table>
+          ${photosHtml}
+          <hr style="border:none;border-top:1px solid #E2E1DA;margin:20px 0;">
+          <p style="font-size:12px;color:#9ca3af;">Sent by ${esc(senderName)} via the RADAH PM platform.</p>
+        </div>`;
+
+      await mail.send({
+        to: valid,
+        subject: `Daily Log — ${log.project_name} — ${dateStr}`,
+        html,
+        replyTo: req.user.email,
+      });
+
+      res.json({ message: `Daily log emailed to ${valid.length} recipient${valid.length === 1 ? "" : "s"}.` });
+    } catch (err) {
+      if (err.code && err.code.startsWith("MAIL_")) {
+        return res.status(502).json({ error: err.message });
+      }
+      console.error("[radah-pm] email daily log error:", err);
+      res.status(500).json({ error: "Something went wrong sending the email." });
+    }
+  }
+);
 
 module.exports = router;

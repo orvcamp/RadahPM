@@ -202,12 +202,106 @@ function Field({ label, value }) {
   );
 }
 
+// ---------- email-log modal ----------
+function EmailLogModal({ projectId, log, onClose }) {
+  const [recipients, setRecipients] = useState("");
+  const [note, setNote] = useState("");
+  const [loadingTeam, setLoadingTeam] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const d = await api.get(`/projects/${projectId}/members`);
+        if (!active) return;
+        const emails = (d.members || []).map((m) => m.email).filter(Boolean);
+        setRecipients(emails.join(", "));
+      } catch {
+        /* leave blank if team can't be loaded */
+      } finally {
+        if (active) setLoadingTeam(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [projectId]);
+
+  async function send() {
+    setError("");
+    const list = recipients.split(/[,\n;]+/).map((e) => e.trim()).filter(Boolean);
+    if (list.length === 0) return setError("Add at least one recipient email.");
+    setSending(true);
+    try {
+      const r = await api.post(`/projects/${projectId}/daily-logs/${log.id}/email`, {
+        recipients: list,
+        note: note.trim() || null,
+      });
+      setDone(r.message || "Email sent.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+        <div className="modal-header">
+          <h3 style={{ fontSize: "1.1rem", textTransform: "uppercase" }}>Email Daily Log</h3>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+        {error && <div className="error-msg">{error}</div>}
+        {done ? (
+          <>
+            <div className="success-msg">{done}</div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "1rem" }}>
+              <button className="btn btn-gold" onClick={onClose}>Done</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-steel" style={{ marginBottom: "1rem" }}>
+              {new Date(log.logDate).toLocaleDateString()} · pre-filled with the project team — edit as needed.
+            </p>
+            <div style={{ marginBottom: "1rem" }}>
+              <label style={labelStyle}>Recipients (comma-separated)</label>
+              <textarea
+                value={recipients}
+                onChange={(e) => setRecipients(e.target.value)}
+                style={{ ...inputStyle, minHeight: 60, resize: "vertical" }}
+                placeholder={loadingTeam ? "Loading team…" : "name@example.com, name2@example.com"}
+              />
+            </div>
+            <div style={{ marginBottom: "1.2rem" }}>
+              <label style={labelStyle}>Note (optional)</label>
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                style={{ ...inputStyle, minHeight: 60, resize: "vertical" }}
+                placeholder="Add a short message to include at the top of the email…"
+              />
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem" }}>
+              <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+              <button className="btn btn-gold" disabled={sending} onClick={send}>{sending ? "Sending…" : "Send Email"}</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DailyLogsTab({ projectId }) {
   const { user } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [modal, setModal] = useState(null); // null | {} | log
+  const [emailLog, setEmailLog] = useState(null); // log being emailed
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -264,12 +358,11 @@ export default function DailyLogsTab({ projectId }) {
                   {log.crewCount != null && ` · ${log.crewCount} crew`}
                 </div>
               </div>
-              {log.canEdit && (
-                <div style={{ display: "flex", gap: "0.4rem" }}>
-                  <button className="btn btn-outline btn-sm" onClick={() => setModal(log)}>Edit</button>
-                  <button className="btn btn-danger btn-sm" onClick={() => remove(log)}>Delete</button>
-                </div>
-              )}
+              <div style={{ display: "flex", gap: "0.4rem" }}>
+                <button className="btn btn-outline btn-sm" onClick={() => setEmailLog(log)}>Email</button>
+                {log.canEdit && <button className="btn btn-outline btn-sm" onClick={() => setModal(log)}>Edit</button>}
+                {log.canEdit && <button className="btn btn-danger btn-sm" onClick={() => remove(log)}>Delete</button>}
+              </div>
             </div>
 
             <Field label="Work Performed" value={log.workPerformed} />
@@ -300,6 +393,14 @@ export default function DailyLogsTab({ projectId }) {
           log={modal.id ? modal : null}
           onClose={() => setModal(null)}
           onSaved={() => { setModal(null); load(); }}
+        />
+      )}
+
+      {emailLog && (
+        <EmailLogModal
+          projectId={projectId}
+          log={emailLog}
+          onClose={() => setEmailLog(null)}
         />
       )}
     </div>
