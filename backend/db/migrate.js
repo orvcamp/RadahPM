@@ -40,6 +40,7 @@ async function migrate() {
     await runSqlFile("migrations_phase3_rfis.sql", "Migration (RFIs)");
     await runSqlFile("migrations_phase3_submittals.sql", "Migration (Submittals)");
     await runSqlFile("migrations_phase3_password_reset.sql", "Migration (password reset)");
+    await runSqlFile("migrations_phase3_project_photo.sql", "Migration (project photo)");
   } finally {
     await pool.end();
   }

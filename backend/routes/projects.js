@@ -6,7 +6,9 @@
 //     in project_members. They cannot create, edit, or delete projects.
 
 const express = require("express");
+const crypto = require("crypto");
 const pool = require("../db/pool");
+const r2 = require("../db/r2");
 const { requireAuth, requireRole, isInternal, requireOrg } = require("../middleware/auth");
 
 const router = express.Router();
@@ -43,9 +45,21 @@ function mapProject(row) {
     targetEndDate: row.target_end_date,
     actualEndDate: row.actual_end_date,
     location: row.location,
+    photoKey: row.photo_key || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+// Attach a short-lived presigned photo URL to each project that has one.
+async function withPhotoUrls(projects) {
+  if (!r2.isConfigured) return projects;
+  return Promise.all(projects.map(async (p) => {
+    if (p.photoKey) {
+      try { p.photoUrl = await r2.getDownloadUrl(p.photoKey); } catch { p.photoUrl = null; }
+    }
+    return p;
+  }));
 }
 
 /**
@@ -69,7 +83,7 @@ router.get("/", requireAuth, requireOrg, async (req, res) => {
         [req.user.id, req.user.orgId]
       );
     }
-    res.json({ projects: result.rows.map(mapProject) });
+    res.json({ projects: await withPhotoUrls(result.rows.map(mapProject)) });
   } catch (err) {
     console.error("[radah-pm] list projects error:", err);
     res.status(500).json({ error: "Something went wrong." });
@@ -301,6 +315,74 @@ router.delete("/:id/members/:userId", requireAuth, requireOrg, requireRole("admi
     res.json({ message: "Member removed from project." });
   } catch (err) {
     console.error("[radah-pm] remove member error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
+// ============================================================
+// PROJECT PHOTO (cover image) — admin/staff, org-scoped. Reuses R2.
+// ============================================================
+function requireR2(req, res, next) {
+  if (!r2.isConfigured) return res.status(503).json({ error: "File storage is not configured yet." });
+  next();
+}
+async function projectInOrg(projectId, orgId) {
+  const r = await pool.query("SELECT photo_key FROM projects WHERE id = $1 AND org_id = $2", [projectId, orgId]);
+  return r.rows[0] || null;
+}
+
+// POST /api/projects/:id/photo/upload-url  { fileName, contentType }
+router.post("/:id/photo/upload-url", requireAuth, requireOrg, requireRole("admin", "staff"), requireR2, async (req, res) => {
+  try {
+    if (!(await projectInOrg(req.params.id, req.user.orgId))) return res.status(404).json({ error: "Project not found." });
+    const { fileName, contentType } = req.body || {};
+    if (!fileName) return res.status(400).json({ error: "fileName is required." });
+    if (contentType && !String(contentType).startsWith("image/")) {
+      return res.status(400).json({ error: "Project photo must be an image." });
+    }
+    const safe = String(fileName).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
+    const storageKey = `projects/${req.params.id}/_photo/${crypto.randomUUID()}-${safe}`;
+    const uploadUrl = await r2.getUploadUrl(storageKey, contentType);
+    res.json({ uploadUrl, storageKey });
+  } catch (err) {
+    console.error("[radah-pm] project photo upload-url error:", err);
+    res.status(500).json({ error: "Could not prepare the upload." });
+  }
+});
+
+// POST /api/projects/:id/photo/confirm  { storageKey }
+router.post("/:id/photo/confirm", requireAuth, requireOrg, requireRole("admin", "staff"), requireR2, async (req, res) => {
+  try {
+    const cur = await projectInOrg(req.params.id, req.user.orgId);
+    if (!cur) return res.status(404).json({ error: "Project not found." });
+    const { storageKey } = req.body || {};
+    if (!storageKey || !String(storageKey).startsWith(`projects/${req.params.id}/_photo/`)) {
+      return res.status(400).json({ error: "Invalid storage key for this project photo." });
+    }
+    // Best-effort cleanup of any previous photo.
+    if (cur.photo_key && cur.photo_key !== storageKey) {
+      try { await r2.deleteObject(cur.photo_key); } catch { /* ignore */ }
+    }
+    await pool.query("UPDATE projects SET photo_key = $1 WHERE id = $2", [storageKey, req.params.id]);
+    let photoUrl = null;
+    try { photoUrl = await r2.getDownloadUrl(storageKey); } catch { /* ignore */ }
+    res.json({ photoKey: storageKey, photoUrl });
+  } catch (err) {
+    console.error("[radah-pm] project photo confirm error:", err);
+    res.status(500).json({ error: "Could not save the photo." });
+  }
+});
+
+// DELETE /api/projects/:id/photo
+router.delete("/:id/photo", requireAuth, requireOrg, requireRole("admin", "staff"), async (req, res) => {
+  try {
+    const cur = await projectInOrg(req.params.id, req.user.orgId);
+    if (!cur) return res.status(404).json({ error: "Project not found." });
+    if (cur.photo_key && r2.isConfigured) { try { await r2.deleteObject(cur.photo_key); } catch { /* ignore */ } }
+    await pool.query("UPDATE projects SET photo_key = NULL WHERE id = $1", [req.params.id]);
+    res.json({ message: "Photo removed." });
+  } catch (err) {
+    console.error("[radah-pm] project photo delete error:", err);
     res.status(500).json({ error: "Something went wrong." });
   }
 });

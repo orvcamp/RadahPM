@@ -1,11 +1,88 @@
 // src/pages/ProjectsPage.jsx
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext.jsx";
 
 const STATUS_OPTIONS = ["planning", "active", "on_hold", "completed", "cancelled"];
+
+// Generated placeholder: initials + a stable color derived from the name.
+const THUMB_COLORS = ["#1E3D2B", "#4C7A3D", "#C9A227", "#2E6F7E", "#8A5A2B", "#5A4B8A", "#B23B3B", "#2E9E5B"];
+function initialsOf(name) {
+  const parts = (name || "?").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+function colorFor(name) {
+  let h = 0;
+  for (let i = 0; i < (name || "").length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return THUMB_COLORS[h % THUMB_COLORS.length];
+}
+
+function ProjectThumb({ project, size = 40 }) {
+  const style = { width: size, height: size, borderRadius: 8, flexShrink: 0, objectFit: "cover" };
+  if (project.photoUrl) {
+    return <img src={project.photoUrl} alt="" style={style} />;
+  }
+  return (
+    <div style={{ ...style, background: colorFor(project.name), color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: size * 0.34, letterSpacing: "0.02em" }}>
+      {initialsOf(project.name)}
+    </div>
+  );
+}
+
+function PhotoModal({ project, onClose, onChanged }) {
+  const fileRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function onFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    if (!file.type.startsWith("image/")) return setError("Please choose an image file.");
+    setError(""); setBusy(true);
+    try {
+      const { uploadUrl, storageKey } = await api.post(`/projects/${project.id}/photo/upload-url`, { fileName: file.name, contentType: file.type });
+      const put = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+      if (!put.ok) throw new Error("Upload to storage failed.");
+      const { photoUrl } = await api.post(`/projects/${project.id}/photo/confirm`, { storageKey });
+      onChanged(project.id, { photoKey: storageKey, photoUrl });
+      onClose();
+    } catch (err) { setError(err.message); setBusy(false); }
+  }
+  async function removePhoto() {
+    setBusy(true); setError("");
+    try {
+      await api.delete(`/projects/${project.id}/photo`);
+      onChanged(project.id, { photoKey: null, photoUrl: null });
+      onClose();
+    } catch (err) { setError(err.message); setBusy(false); }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+        <div className="modal-header">
+          <h3 style={{ fontSize: "1.05rem", textTransform: "uppercase" }}>Project Photo</h3>
+          <button className="modal-close" onClick={onClose}>&times;</button>
+        </div>
+        {error && <div className="error-msg">{error}</div>}
+        <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1.2rem" }}>
+          <ProjectThumb project={project} size={64} />
+          <div className="text-sm text-steel">{project.name}</div>
+        </div>
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFile} />
+        <div style={{ display: "flex", gap: "0.6rem", justifyContent: "flex-end" }}>
+          {project.photoKey && <button className="btn btn-outline btn-sm" disabled={busy} onClick={removePhoto}>Remove</button>}
+          <button className="btn btn-gold" disabled={busy} onClick={() => fileRef.current?.click()}>{busy ? "Working…" : project.photoKey ? "Change Photo" : "Upload Photo"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function NewProjectModal({ onClose, onCreated }) {
   const [form, setForm] = useState({
@@ -100,6 +177,11 @@ export default function ProjectsPage() {
   const [error, setError] = useState("");
   const [showNew, setShowNew] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [photoProject, setPhotoProject] = useState(null);
+
+  function applyPhotoChange(projectId, patch) {
+    setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, ...patch } : p)));
+  }
 
   function loadProjects() {
     setLoading(true);
@@ -155,6 +237,7 @@ export default function ProjectsPage() {
           <table className="data-table">
             <thead>
               <tr>
+                <th style={{ width: 56 }}></th>
                 <th>Project</th>
                 <th>Client / Owner</th>
                 <th>Status</th>
@@ -165,6 +248,11 @@ export default function ProjectsPage() {
             <tbody>
               {filtered.map((p) => (
                 <tr key={p.id} className="clickable" onClick={() => navigate(`/projects/${p.id}`)}>
+                  <td onClick={isInternal ? (e) => { e.stopPropagation(); setPhotoProject(p); } : undefined}
+                      style={isInternal ? { cursor: "pointer" } : undefined}
+                      title={isInternal ? "Set project photo" : undefined}>
+                    <ProjectThumb project={p} />
+                  </td>
                   <td><strong>{p.name}</strong></td>
                   <td>{p.clientOrgName || "—"}</td>
                   <td><span className={`badge badge-${p.status}`}>{p.status.replace("_", " ")}</span></td>
@@ -185,6 +273,14 @@ export default function ProjectsPage() {
             setProjects((prev) => [project, ...prev]);
             navigate(`/projects/${project.id}`);
           }}
+        />
+      )}
+
+      {photoProject && (
+        <PhotoModal
+          project={photoProject}
+          onClose={() => setPhotoProject(null)}
+          onChanged={applyPhotoChange}
         />
       )}
     </div>
