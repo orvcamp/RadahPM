@@ -13,6 +13,7 @@ const MODULES = [
   { key: "budget", label: "Budget & Cost" },
   { key: "changeorders", label: "Change Orders" },
   { key: "dailylogs", label: "Daily Logs" },
+  { key: "rfis", label: "RFIs" },
 ];
 const MODULE_KEYS = MODULES.map((m) => m.key);
 

@@ -10,6 +10,7 @@ import DocumentsTab from "../components/DocumentsTab.jsx";
 import BudgetTab from "../components/BudgetTab.jsx";
 import ChangeOrdersTab from "../components/ChangeOrdersTab.jsx";
 import DailyLogsTab from "../components/DailyLogsTab.jsx";
+import RfisTab from "../components/RfisTab.jsx";
 
 function AddPhaseInline({ projectId, onAdded }) {
   const [name, setName] = useState("");
@@ -200,6 +201,9 @@ export default function ProjectDetailPage() {
         {modOn("dailylogs") && (
           <button className={`tab-btn ${tab === "dailylogs" ? "active" : ""}`} onClick={() => setTab("dailylogs")}>Daily Logs</button>
         )}
+        {modOn("rfis") && (
+          <button className={`tab-btn ${tab === "rfis" ? "active" : ""}`} onClick={() => setTab("rfis")}>RFIs</button>
+        )}
       </div>
 
       {tab === "timeline" && (
@@ -329,6 +333,8 @@ export default function ProjectDetailPage() {
       {tab === "changeorders" && user.role !== "trade_partner" && modOn("changeorders") && <ChangeOrdersTab projectId={id} />}
 
       {tab === "dailylogs" && modOn("dailylogs") && <DailyLogsTab projectId={id} />}
+
+      {tab === "rfis" && modOn("rfis") && <RfisTab projectId={id} />}
 
       {taskModal !== null && (
         <TaskModal

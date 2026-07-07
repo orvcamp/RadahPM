@@ -322,6 +322,7 @@ const RESOURCE_TABLES = new Set([
   "document_folders",
   "phases",
   "tasks",
+  "rfis",
 ]);
 async function resourceProjectId(table, id) {
   if (!RESOURCE_TABLES.has(table)) throw new Error("resourceProjectId: table not allowed");
