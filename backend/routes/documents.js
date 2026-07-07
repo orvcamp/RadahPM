@@ -23,6 +23,7 @@ const crypto = require("crypto");
 const pool = require("../db/pool");
 const { requireAuth, requireRole, isInternal } = require("../middleware/auth");
 const { userCanAccessProject, resourceProjectId } = require("./projects");
+const { requireModule } = require("../orgModules");
 const r2 = require("../db/r2");
 
 const router = express.Router();
@@ -82,7 +83,7 @@ function buildStorageKey(projectId, fileName) {
  * GET /api/projects/:projectId/documents
  * List all documents for a project the user can access.
  */
-router.get("/projects/:projectId/documents", requireAuth, async (req, res) => {
+router.get("/projects/:projectId/documents", requireAuth, requireModule("documents"), async (req, res) => {
   try {
     const allowed = await userCanAccessProject(req.user, req.params.projectId);
     if (!allowed) {
@@ -291,7 +292,7 @@ async function collectDescendantIds(folderId) {
 }
 
 // GET /api/projects/:projectId/folders — flat list; the client builds the tree.
-router.get("/projects/:projectId/folders", requireAuth, async (req, res) => {
+router.get("/projects/:projectId/folders", requireAuth, requireModule("documents"), async (req, res) => {
   try {
     const allowed = await userCanAccessProject(req.user, req.params.projectId);
     if (!allowed) return res.status(403).json({ error: "You do not have access to this project." });

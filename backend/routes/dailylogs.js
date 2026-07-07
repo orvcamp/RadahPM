@@ -19,6 +19,7 @@ const { requireAuth, isInternal } = require("../middleware/auth");
 const { userCanAccessProject, resourceProjectId } = require("./projects");
 const r2 = require("../db/r2");
 const mail = require("../mail");
+const { requireModule } = require("../orgModules");
 
 const router = express.Router();
 
@@ -89,7 +90,7 @@ function canEditLog(user, logRow) {
 // Any project member (admin/staff/client/trade_partner).
 // Each log includes its photos with short-lived view URLs.
 // ============================================================
-router.get("/projects/:projectId/daily-logs", requireAuth, async (req, res) => {
+router.get("/projects/:projectId/daily-logs", requireAuth, requireModule("dailylogs"), async (req, res) => {
   try {
     const allowed = await userCanAccessProject(req.user, req.params.projectId);
     if (!allowed) {

@@ -23,6 +23,7 @@ const express = require("express");
 const pool = require("../db/pool");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { userCanAccessProject, resourceProjectId } = require("./projects");
+const { requireModule } = require("../orgModules");
 
 const router = express.Router();
 
@@ -130,7 +131,7 @@ async function lineBelongsToProject(lineId, projectId) {
 // GET /api/projects/:projectId/budget
 // Any project member EXCEPT trade partners.
 // ============================================================
-router.get("/projects/:projectId/budget", requireAuth, async (req, res) => {
+router.get("/projects/:projectId/budget", requireAuth, requireModule("budget"), async (req, res) => {
   try {
     if (req.user.role === "trade_partner") {
       return res.status(403).json({ error: "You do not have access to project budgets." });

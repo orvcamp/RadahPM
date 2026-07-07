@@ -23,6 +23,7 @@ const crypto = require("crypto");
 const pool = require("../db/pool");
 const { requireAuth, requireRole, isInternal } = require("../middleware/auth");
 const { userCanAccessProject, resourceProjectId } = require("./projects");
+const { requireModule } = require("../orgModules");
 const r2 = require("../db/r2");
 
 const router = express.Router();
@@ -125,7 +126,7 @@ async function fetchChangeOrder(id, runner = pool) {
 // admin/staff + client (project member). trade_partner: 403.
 // Also returns the project's budget categories (for the create form).
 // ============================================================
-router.get("/projects/:projectId/change-orders", requireAuth, async (req, res) => {
+router.get("/projects/:projectId/change-orders", requireAuth, requireModule("changeorders"), async (req, res) => {
   try {
     if (req.user.role === "trade_partner") {
       return res.status(403).json({ error: "You do not have access to change orders." });

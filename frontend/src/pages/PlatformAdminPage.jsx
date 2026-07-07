@@ -11,6 +11,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 export default function PlatformAdminPage() {
   const { user } = useAuth();
   const [orgs, setOrgs] = useState([]);
+  const [availableModules, setAvailableModules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [form, setForm] = useState({ orgName: "", adminEmail: "", adminFullName: "", adminPassword: "" });
@@ -23,6 +24,7 @@ export default function PlatformAdminPage() {
     try {
       const d = await api.get("/platform/organizations");
       setOrgs(d.organizations);
+      setAvailableModules(d.availableModules || []);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -31,6 +33,17 @@ export default function PlatformAdminPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  async function toggleModule(org, moduleKey, enabled) {
+    // optimistic update
+    setOrgs((prev) => prev.map((o) => o.id === org.id ? { ...o, modules: { ...o.modules, [moduleKey]: enabled } } : o));
+    try {
+      await api.patch(`/platform/organizations/${org.id}/modules`, { moduleKey, enabled });
+    } catch (err) {
+      alert(err.message);
+      load(); // revert on failure
+    }
+  }
 
   async function createOrg(e) {
     e.preventDefault();
@@ -98,7 +111,7 @@ export default function PlatformAdminPage() {
         ) : (
           <table className="data-table">
             <thead>
-              <tr><th>Organization</th><th>Users</th><th>Projects</th><th>Created</th></tr>
+              <tr><th>Organization</th><th>Users</th><th>Projects</th><th>Modules</th><th>Created</th></tr>
             </thead>
             <tbody>
               {orgs.map((o) => (
@@ -106,6 +119,31 @@ export default function PlatformAdminPage() {
                   <td><strong>{o.name}</strong></td>
                   <td>{o.userCount}</td>
                   <td>{o.projectCount}</td>
+                  <td>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                      {availableModules.map((m) => {
+                        const on = o.modules ? o.modules[m.key] !== false : true;
+                        return (
+                          <button
+                            key={m.key}
+                            onClick={() => toggleModule(o, m.key, !on)}
+                            title={on ? "Enabled — click to disable" : "Disabled — click to enable"}
+                            style={{
+                              fontSize: "0.72rem",
+                              padding: "0.2rem 0.5rem",
+                              borderRadius: 999,
+                              border: "1px solid var(--line)",
+                              cursor: "pointer",
+                              background: on ? "rgba(46,158,91,0.12)" : "rgba(0,0,0,0.04)",
+                              color: on ? "var(--green-deep, #2E9E5B)" : "var(--steel)",
+                            }}
+                          >
+                            {on ? "✓ " : "✕ "}{m.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </td>
                   <td>{o.createdAt ? new Date(o.createdAt).toLocaleDateString() : "—"}</td>
                 </tr>
               ))}

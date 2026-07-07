@@ -14,6 +14,7 @@ const budgetRoutes = require("./routes/budget");
 const changeOrderRoutes = require("./routes/changeorders");
 const dailyLogRoutes = require("./routes/dailylogs");
 const platformRoutes = require("./routes/platform");
+const myModulesRoutes = require("./routes/mymodules");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -47,6 +48,7 @@ app.use("/api", budgetRoutes); // mounts /api/projects/:projectId/budget and /ap
 app.use("/api", changeOrderRoutes); // mounts /api/projects/:projectId/change-orders and /api/change-orders/:id
 app.use("/api", dailyLogRoutes); // mounts /api/projects/:projectId/daily-logs and /api/daily-logs/:id
 app.use("/api/platform", platformRoutes); // platform-admin org provisioning
+app.use("/api", myModulesRoutes); // GET /api/my-modules
 
 // 404 handler
 app.use((req, res) => {

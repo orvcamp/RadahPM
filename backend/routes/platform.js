@@ -11,6 +11,7 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const pool = require("../db/pool");
 const { requireAuth, requirePlatformAdmin } = require("../middleware/auth");
+const { getOrgModules, MODULES, MODULE_KEYS } = require("../orgModules");
 
 const router = express.Router();
 
@@ -24,16 +25,19 @@ router.get("/organizations", requireAuth, requirePlatformAdmin, async (req, res)
          FROM organizations o
          ORDER BY o.created_at ASC`
     );
-    res.json({
-      organizations: r.rows.map((o) => ({
+    const organizations = [];
+    for (const o of r.rows) {
+      organizations.push({
         id: o.id,
         name: o.name,
         isActive: o.is_active,
         userCount: Number(o.user_count),
         projectCount: Number(o.project_count),
         createdAt: o.created_at,
-      })),
-    });
+        modules: await getOrgModules(o.id),
+      });
+    }
+    res.json({ organizations, availableModules: MODULES });
   } catch (err) {
     console.error("[radah-pm] list organizations error:", err);
     res.status(500).json({ error: "Something went wrong." });
@@ -89,6 +93,33 @@ router.post("/organizations", requireAuth, requirePlatformAdmin, async (req, res
     res.status(500).json({ error: "Something went wrong." });
   } finally {
     client.release();
+  }
+});
+
+
+// PATCH /api/platform/organizations/:id/modules
+// Body: { moduleKey, enabled }  — enable/disable a capability module for an org.
+router.patch("/organizations/:id/modules", requireAuth, requirePlatformAdmin, async (req, res) => {
+  const { moduleKey, enabled } = req.body || {};
+  if (!MODULE_KEYS.includes(moduleKey)) {
+    return res.status(400).json({ error: "Unknown module." });
+  }
+  if (typeof enabled !== "boolean") {
+    return res.status(400).json({ error: "enabled must be true or false." });
+  }
+  try {
+    const org = await pool.query("SELECT 1 FROM organizations WHERE id = $1", [req.params.id]);
+    if (org.rows.length === 0) return res.status(404).json({ error: "Organization not found." });
+    await pool.query(
+      `INSERT INTO org_modules (org_id, module_key, enabled)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (org_id, module_key) DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = now()`,
+      [req.params.id, moduleKey, enabled]
+    );
+    res.json({ moduleKey, enabled });
+  } catch (err) {
+    console.error("[radah-pm] update org module error:", err);
+    res.status(500).json({ error: "Something went wrong." });
   }
 });
 

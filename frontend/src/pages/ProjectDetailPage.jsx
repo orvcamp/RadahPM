@@ -106,6 +106,13 @@ export default function ProjectDetailPage() {
   const [tasks, setTasks] = useState([]);
   const [members, setMembers] = useState([]);
   const [tab, setTab] = useState("timeline");
+  const [modules, setModules] = useState(null); // enabled capability modules for this org
+
+  useEffect(() => {
+    api.get("/my-modules").then((d) => setModules(d.modules)).catch(() => setModules(null));
+  }, []);
+  // default-show a module unless we know it's disabled
+  const modOn = (key) => !modules || modules[key] !== false;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [taskModal, setTaskModal] = useState(null); // null | {} (new) | task (edit)
@@ -181,14 +188,18 @@ export default function ProjectDetailPage() {
         <button className={`tab-btn ${tab === "tasks" ? "active" : ""}`} onClick={() => setTab("tasks")}>Tasks</button>
         <button className={`tab-btn ${tab === "phases" ? "active" : ""}`} onClick={() => setTab("phases")}>Phases</button>
         <button className={`tab-btn ${tab === "team" ? "active" : ""}`} onClick={() => setTab("team")}>Team</button>
-        <button className={`tab-btn ${tab === "documents" ? "active" : ""}`} onClick={() => setTab("documents")}>Documents</button>
-        {user.role !== "trade_partner" && (
+        {modOn("documents") && (
+          <button className={`tab-btn ${tab === "documents" ? "active" : ""}`} onClick={() => setTab("documents")}>Documents</button>
+        )}
+        {user.role !== "trade_partner" && modOn("budget") && (
           <button className={`tab-btn ${tab === "budget" ? "active" : ""}`} onClick={() => setTab("budget")}>Budget</button>
         )}
-        {user.role !== "trade_partner" && (
+        {user.role !== "trade_partner" && modOn("changeorders") && (
           <button className={`tab-btn ${tab === "changeorders" ? "active" : ""}`} onClick={() => setTab("changeorders")}>Change Orders</button>
         )}
-        <button className={`tab-btn ${tab === "dailylogs" ? "active" : ""}`} onClick={() => setTab("dailylogs")}>Daily Logs</button>
+        {modOn("dailylogs") && (
+          <button className={`tab-btn ${tab === "dailylogs" ? "active" : ""}`} onClick={() => setTab("dailylogs")}>Daily Logs</button>
+        )}
       </div>
 
       {tab === "timeline" && (
@@ -311,13 +322,13 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {tab === "documents" && <DocumentsTab projectId={id} />}
+      {tab === "documents" && modOn("documents") && <DocumentsTab projectId={id} />}
 
-      {tab === "budget" && user.role !== "trade_partner" && <BudgetTab projectId={id} />}
+      {tab === "budget" && user.role !== "trade_partner" && modOn("budget") && <BudgetTab projectId={id} />}
 
-      {tab === "changeorders" && user.role !== "trade_partner" && <ChangeOrdersTab projectId={id} />}
+      {tab === "changeorders" && user.role !== "trade_partner" && modOn("changeorders") && <ChangeOrdersTab projectId={id} />}
 
-      {tab === "dailylogs" && <DailyLogsTab projectId={id} />}
+      {tab === "dailylogs" && modOn("dailylogs") && <DailyLogsTab projectId={id} />}
 
       {taskModal !== null && (
         <TaskModal

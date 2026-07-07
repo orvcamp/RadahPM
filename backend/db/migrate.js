@@ -36,6 +36,7 @@ async function migrate() {
     await runSqlFile("migrations_phase2_folders.sql", "Migration (document folders)");
     await runSqlFile("migrations_phase2_co_attachments.sql", "Migration (change order attachments)");
     await runSqlFile("migrations_phase3_orgs.sql", "Phase 3 migration (organizations / multi-tenancy)");
+    await runSqlFile("migrations_phase3_modules.sql", "Phase 3 migration (org modules)");
   } finally {
     await pool.end();
   }
