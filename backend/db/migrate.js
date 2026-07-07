@@ -39,6 +39,7 @@ async function migrate() {
     await runSqlFile("migrations_phase3_modules.sql", "Phase 3 migration (org modules)");
     await runSqlFile("migrations_phase3_rfis.sql", "Migration (RFIs)");
     await runSqlFile("migrations_phase3_submittals.sql", "Migration (Submittals)");
+    await runSqlFile("migrations_phase3_password_reset.sql", "Migration (password reset)");
   } finally {
     await pool.end();
   }

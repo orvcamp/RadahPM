@@ -3,8 +3,14 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const pool = require("../db/pool");
+const mail = require("../mail");
 const { requireAuth, requireRole, JWT_SECRET } = require("../middleware/auth");
+
+const APP_URL = (process.env.APP_URL || "https://app.mangodoe.com").replace(/\/+$/, "");
+const APP_NAME = process.env.APP_NAME || "MangoDoe";
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 const router = express.Router();
 
@@ -136,6 +142,98 @@ router.post("/change-password", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("[radah-pm] change-password error:", err);
     res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
+/**
+ * POST /api/auth/forgot-password  { email }
+ * Always responds the same way (no account enumeration). If the email maps to
+ * an active user, a single-use, 1-hour reset link is emailed.
+ */
+router.post("/forgot-password", async (req, res) => {
+  const generic = { message: "If an account exists for that email, a password reset link has been sent." };
+  try {
+    const email = (req.body && req.body.email ? String(req.body.email) : "").toLowerCase().trim();
+    if (!email) return res.status(400).json({ error: "Email is required." });
+
+    const userRes = await pool.query(
+      "SELECT id, email, full_name, is_active FROM users WHERE email = $1",
+      [email]
+    );
+    const user = userRes.rows[0];
+    if (user && user.is_active !== false) {
+      // Invalidate any prior unused tokens for this user.
+      await pool.query("DELETE FROM password_reset_tokens WHERE user_id = $1 AND used_at IS NULL", [user.id]);
+
+      const token = crypto.randomBytes(32).toString("hex");
+      const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+      const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS);
+      await pool.query(
+        "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
+        [user.id, tokenHash, expiresAt]
+      );
+
+      if (mail.isConfigured) {
+        const link = `${APP_URL}/reset-password?token=${token}`;
+        const esc = mail.escapeHtml;
+        const html = `
+          <div style="font-family:Arial,Helvetica,sans-serif;color:#1E3D2B;max-width:520px;margin:0 auto;">
+            <h2 style="margin:0 0 12px;">Reset your ${esc(APP_NAME)} password</h2>
+            <p style="color:#26241F;line-height:1.5;">Hi ${esc(user.full_name || "there")}, we received a request to reset your password.</p>
+            <p style="margin:22px 0;">
+              <a href="${link}" style="background:#F28C28;color:#fff;text-decoration:none;padding:12px 22px;border-radius:6px;font-weight:bold;display:inline-block;">Set a new password</a>
+            </p>
+            <p style="color:#6b7280;font-size:13px;line-height:1.5;">This link expires in 1 hour and can be used once. If you didn't request this, you can safely ignore this email — your password won't change.</p>
+            <p style="color:#9ca3af;font-size:12px;word-break:break-all;">Or paste this link into your browser:<br>${link}</p>
+          </div>`;
+        try {
+          await mail.send({ to: [user.email], subject: `Reset your ${APP_NAME} password`, html });
+        } catch (e) {
+          console.error("[radah-pm] reset email send failed:", e.message);
+        }
+      } else {
+        console.error("[radah-pm] forgot-password requested but mail is not configured.");
+      }
+    }
+    return res.json(generic);
+  } catch (err) {
+    console.error("[radah-pm] forgot-password error:", err);
+    // Still respond generically to avoid leaking anything.
+    return res.json(generic);
+  }
+});
+
+/**
+ * POST /api/auth/reset-password  { token, newPassword }
+ * Verifies a single-use, unexpired token and sets the new password.
+ */
+router.post("/reset-password", async (req, res) => {
+  const { token, newPassword } = req.body || {};
+  if (!token || !newPassword) {
+    return res.status(400).json({ error: "Token and new password are required." });
+  }
+  if (String(newPassword).length < 8) {
+    return res.status(400).json({ error: "Password must be at least 8 characters." });
+  }
+  try {
+    const tokenHash = crypto.createHash("sha256").update(String(token)).digest("hex");
+    const rowRes = await pool.query(
+      "SELECT id, user_id FROM password_reset_tokens WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()",
+      [tokenHash]
+    );
+    const row = rowRes.rows[0];
+    if (!row) {
+      return res.status(400).json({ error: "This reset link is invalid or has expired. Please request a new one." });
+    }
+    const newHash = await bcrypt.hash(String(newPassword), 12);
+    await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [newHash, row.user_id]);
+    // Consume this token and clear any others for the user.
+    await pool.query("UPDATE password_reset_tokens SET used_at = now() WHERE id = $1", [row.id]);
+    await pool.query("DELETE FROM password_reset_tokens WHERE user_id = $1 AND used_at IS NULL", [row.user_id]);
+    return res.json({ message: "Your password has been reset. You can now sign in." });
+  } catch (err) {
+    console.error("[radah-pm] reset-password error:", err);
+    return res.status(500).json({ error: "Something went wrong. Please try again." });
   }
 });
 

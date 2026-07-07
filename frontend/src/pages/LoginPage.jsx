@@ -1,7 +1,7 @@
 // src/pages/LoginPage.jsx
 
 import { useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { APP_NAME } from "../config.js";
 
@@ -76,6 +76,10 @@ export default function LoginPage() {
             {submitting ? "Signing in..." : "Sign In"}
           </button>
         </form>
+
+        <p className="auth-switch" style={{ marginTop: "0.9rem" }}>
+          <Link to="/forgot-password">Forgot password?</Link>
+        </p>
 
         <p className="auth-switch">
           Access is by invitation. Contact your organization's administrator for an account.
