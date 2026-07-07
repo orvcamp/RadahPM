@@ -18,17 +18,47 @@ function isOverdue(rfi) {
   return due < new Date();
 }
 
+// Upload one file to an RFI via the presigned-R2 flow.
+async function uploadRfiAttachment(projectId, rfiId, file) {
+  const ct = file.type || "application/octet-stream";
+  const { uploadUrl, storageKey } = await api.post(
+    `/projects/${projectId}/rfis/${rfiId}/attachments/upload-url`,
+    { fileName: file.name, contentType: ct }
+  );
+  const put = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": ct }, body: file });
+  if (!put.ok) throw new Error("Attachment upload to storage failed.");
+  await api.post(
+    `/projects/${projectId}/rfis/${rfiId}/attachments/confirm`,
+    { storageKey, fileName: file.name, contentType: ct, sizeBytes: file.size }
+  );
+}
+
 // ---------- create / edit modal ----------
 function RfiModal({ projectId, members, rfi, onClose, onSaved }) {
   const isEdit = Boolean(rfi);
+  const fileRef = useRef(null);
   const [form, setForm] = useState({
     subject: rfi?.subject || "",
     question: rfi?.question || "",
     dueDate: rfi?.dueDate ? String(rfi.dueDate).slice(0, 10) : "",
     assignedTo: rfi?.assignedTo || "",
   });
+  const [existingAttachments, setExistingAttachments] = useState(rfi?.attachments || []);
+  const [pendingFiles, setPendingFiles] = useState([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState("");
+
+  function onFilesPicked(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    setPendingFiles((prev) => [...prev, ...files]);
+  }
+  async function detachExisting(a) {
+    if (!confirm(`Remove "${a.fileName}" from this RFI?`)) return;
+    try { await api.delete(`/rfi-documents/${a.id}`); setExistingAttachments((p) => p.filter((x) => x.id !== a.id)); }
+    catch (err) { alert(err.message); }
+  }
 
   async function submit(e) {
     e.preventDefault();
@@ -42,10 +72,20 @@ function RfiModal({ projectId, members, rfi, onClose, onSaved }) {
         dueDate: form.dueDate || null,
         assignedTo: form.assignedTo || null,
       };
-      if (isEdit) await api.patch(`/rfis/${rfi.id}`, payload);
-      else await api.post(`/projects/${projectId}/rfis`, payload);
+      let rfiId;
+      if (isEdit) {
+        await api.patch(`/rfis/${rfi.id}`, payload);
+        rfiId = rfi.id;
+      } else {
+        const { rfi: created } = await api.post(`/projects/${projectId}/rfis`, payload);
+        rfiId = created.id;
+      }
+      for (let i = 0; i < pendingFiles.length; i++) {
+        setProgress(`Uploading attachment ${i + 1} of ${pendingFiles.length}…`);
+        await uploadRfiAttachment(projectId, rfiId, pendingFiles[i]);
+      }
       onSaved();
-    } catch (err) { setError(err.message); setSaving(false); }
+    } catch (err) { setError(err.message); setSaving(false); setProgress(""); }
   }
 
   return (
@@ -56,6 +96,7 @@ function RfiModal({ projectId, members, rfi, onClose, onSaved }) {
           <button className="modal-close" onClick={onClose}>×</button>
         </div>
         {error && <div className="error-msg">{error}</div>}
+        {progress && <div className="success-msg">{progress}</div>}
         <form onSubmit={submit}>
           <div style={{ marginBottom: "1rem" }}>
             <label style={labelStyle}>Subject</label>
@@ -65,7 +106,7 @@ function RfiModal({ projectId, members, rfi, onClose, onSaved }) {
             <label style={labelStyle}>Question</label>
             <textarea value={form.question} onChange={(e) => setForm((f) => ({ ...f, question: e.target.value }))} style={{ ...inputStyle, minHeight: 80, resize: "vertical" }} placeholder="Describe the question or clarification needed…" />
           </div>
-          <div style={{ display: "flex", gap: "0.8rem", marginBottom: "1.4rem" }}>
+          <div style={{ display: "flex", gap: "0.8rem", marginBottom: "1rem" }}>
             <div style={{ width: 180 }}>
               <label style={labelStyle}>Due Date</label>
               <input type="date" value={form.dueDate} onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))} style={inputStyle} />
@@ -78,6 +119,25 @@ function RfiModal({ projectId, members, rfi, onClose, onSaved }) {
               </select>
             </div>
           </div>
+
+          {/* Attachments */}
+          <div style={{ marginBottom: "1.4rem" }}>
+            <label style={labelStyle}>Attachments</label>
+            {existingAttachments.length > 0 && (
+              <div style={{ marginBottom: "0.5rem" }}>
+                {existingAttachments.map((a) => (
+                  <div key={a.id} className="flex-between" style={{ padding: "0.3rem 0", fontSize: "0.84rem" }}>
+                    <span>{a.fileName}</span>
+                    <button type="button" onClick={() => detachExisting(a)} style={{ border: "none", background: "none", color: "var(--red)", cursor: "pointer" }}>Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {pendingFiles.length > 0 && <p className="text-sm text-steel" style={{ marginBottom: "0.5rem" }}>{pendingFiles.length} file(s) ready to upload on save.</p>}
+            <input ref={fileRef} type="file" multiple style={{ display: "none" }} onChange={onFilesPicked} />
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => fileRef.current?.click()}>+ Add Files</button>
+          </div>
+
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem" }}>
             <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
             <button className="btn btn-gold" disabled={saving}>{saving ? "Saving…" : isEdit ? "Save" : "Create RFI"}</button>
