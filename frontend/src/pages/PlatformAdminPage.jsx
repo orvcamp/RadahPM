@@ -17,6 +17,17 @@ export default function PlatformAdminPage() {
   const [form, setForm] = useState({ orgName: "", adminEmail: "", adminFullName: "", adminPassword: "" });
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
+  const [resetInfo, setResetInfo] = useState(null);
+
+  async function resetAdmin(org) {
+    if (!confirm(`Reset the admin password for "${org.name}"? This generates a new temporary password.`)) return;
+    try {
+      const d = await api.post(`/platform/organizations/${org.id}/reset-admin`, {});
+      setResetInfo({ org, ...d });
+    } catch (err) {
+      alert(err.message);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -111,7 +122,7 @@ export default function PlatformAdminPage() {
         ) : (
           <table className="data-table">
             <thead>
-              <tr><th>Organization</th><th>Users</th><th>Projects</th><th>Modules</th><th>Created</th></tr>
+              <tr><th>Organization</th><th>Users</th><th>Projects</th><th>Modules</th><th>Created</th><th></th></tr>
             </thead>
             <tbody>
               {orgs.map((o) => (
@@ -145,12 +156,36 @@ export default function PlatformAdminPage() {
                     </div>
                   </td>
                   <td>{o.createdAt ? new Date(o.createdAt).toLocaleDateString() : "—"}</td>
+                  <td style={{ textAlign: "right" }}>
+                    <button className="btn btn-outline btn-sm" onClick={() => resetAdmin(o)}>Reset Admin PW</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </div>
+
+      {resetInfo && (
+        <div className="modal-backdrop" onClick={() => setResetInfo(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 style={{ fontSize: "1.1rem", textTransform: "uppercase" }}>Admin Password Reset</h3>
+              <button className="modal-close" onClick={() => setResetInfo(null)}>×</button>
+            </div>
+            <p className="text-sm" style={{ marginBottom: "0.6rem" }}>
+              New temporary password for <strong>{resetInfo.fullName || resetInfo.email}</strong> ({resetInfo.email}) at <strong>{resetInfo.org.name}</strong>:
+            </p>
+            <div style={{ fontFamily: "monospace", fontSize: "1.05rem", background: "var(--paper, #f7f6f2)", padding: "0.7rem 1rem", borderRadius: 6, border: "1px solid var(--line)", wordBreak: "break-all", marginBottom: "0.8rem" }}>
+              {resetInfo.temporaryPassword}
+            </div>
+            <p className="text-sm text-steel" style={{ marginBottom: "1rem" }}>{resetInfo.note}</p>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button className="btn btn-gold" onClick={() => setResetInfo(null)}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

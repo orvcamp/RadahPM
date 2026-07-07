@@ -8,6 +8,7 @@
 // Guarded by requirePlatformAdmin (the is_platform_admin flag in the JWT).
 
 const express = require("express");
+const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const pool = require("../db/pool");
 const { requireAuth, requirePlatformAdmin } = require("../middleware/auth");
@@ -119,6 +120,33 @@ router.patch("/organizations/:id/modules", requireAuth, requirePlatformAdmin, as
     res.json({ moduleKey, enabled });
   } catch (err) {
     console.error("[radah-pm] update org module error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
+// POST /api/platform/organizations/:id/reset-admin
+// Platform-admin recovery: resets the earliest admin of an org and returns a
+// one-time temporary password. Use to recover access to a tenant you manage.
+router.post("/organizations/:id/reset-admin", requireAuth, requirePlatformAdmin, async (req, res) => {
+  try {
+    const u = await pool.query(
+      "SELECT id, email, full_name FROM users WHERE org_id = $1 AND role = 'admin' ORDER BY created_at ASC LIMIT 1",
+      [req.params.id]
+    );
+    if (u.rows.length === 0) {
+      return res.status(404).json({ error: "This organization has no admin user to reset." });
+    }
+    const tempPassword = crypto.randomBytes(9).toString("base64").replace(/[/+=]/g, "");
+    const passwordHash = await bcrypt.hash(tempPassword, 12);
+    await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [passwordHash, u.rows[0].id]);
+    res.json({
+      email: u.rows[0].email,
+      fullName: u.rows[0].full_name,
+      temporaryPassword: tempPassword,
+      note: "Share this with the org admin through a secure channel. They should change it after logging in.",
+    });
+  } catch (err) {
+    console.error("[radah-pm] reset org admin error:", err);
     res.status(500).json({ error: "Something went wrong." });
   }
 });
