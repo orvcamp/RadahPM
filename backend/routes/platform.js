@@ -49,12 +49,9 @@ router.get("/organizations", requireAuth, requirePlatformAdmin, async (req, res)
 // Body: { orgName, adminEmail, adminFullName, adminPassword }
 // The created admin is a TENANT admin (role='admin'), not a platform admin.
 router.post("/organizations", requireAuth, requirePlatformAdmin, async (req, res) => {
-  const { orgName, adminEmail, adminFullName, adminPassword } = req.body || {};
+  const { orgName, adminEmail, adminFullName } = req.body || {};
   if (!orgName || !orgName.trim()) return res.status(400).json({ error: "Organization name is required." });
   if (!adminEmail || !adminFullName) return res.status(400).json({ error: "Admin email and full name are required." });
-  if (!adminPassword || adminPassword.length < 8) {
-    return res.status(400).json({ error: "Admin password must be at least 8 characters." });
-  }
 
   const client = await pool.connect();
   try {
@@ -65,13 +62,16 @@ router.post("/organizations", requireAuth, requirePlatformAdmin, async (req, res
       return res.status(409).json({ error: "A user with that email already exists." });
     }
 
+    // Auto-generate a temporary password for the new org admin.
+    const tempPassword = crypto.randomBytes(9).toString("base64").replace(/[/+=]/g, "");
+
     await client.query("BEGIN");
     const orgRes = await client.query(
       "INSERT INTO organizations (name) VALUES ($1) RETURNING id, name",
       [orgName.trim()]
     );
     const orgId = orgRes.rows[0].id;
-    const passwordHash = await bcrypt.hash(adminPassword, 12);
+    const passwordHash = await bcrypt.hash(tempPassword, 12);
     const userRes = await client.query(
       `INSERT INTO users (email, password_hash, full_name, role, is_active, org_id, is_platform_admin)
        VALUES ($1, $2, $3, 'admin', TRUE, $4, FALSE)
@@ -87,6 +87,8 @@ router.post("/organizations", requireAuth, requirePlatformAdmin, async (req, res
         email: userRes.rows[0].email,
         fullName: userRes.rows[0].full_name,
       },
+      temporaryPassword: tempPassword,
+      note: "Share this temporary password with the org admin securely. They should change it after logging in.",
     });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});

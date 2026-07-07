@@ -90,7 +90,10 @@ export default function PlatformAdminPage() {
         {result && (
           <div className="success-msg" style={{ marginBottom: "1rem" }}>
             Created <strong>{result.organization.name}</strong> with admin <strong>{result.admin.email}</strong>.
-            Share the password you set with them securely.
+            <div style={{ marginTop: "0.6rem" }}>Temporary password (share securely — they change it after first login):</div>
+            <div style={{ fontFamily: "monospace", fontSize: "1.05rem", background: "var(--paper, #f7f6f2)", padding: "0.55rem 0.9rem", borderRadius: 6, border: "1px solid var(--line)", wordBreak: "break-all", marginTop: "0.4rem", display: "inline-block" }}>
+              {result.temporaryPassword}
+            </div>
           </div>
         )}
         <form onSubmit={createOrg}>
@@ -107,11 +110,8 @@ export default function PlatformAdminPage() {
               <label className="text-sm text-steel">Admin email</label>
               <input type="email" value={form.adminEmail} onChange={(e) => setForm((f) => ({ ...f, adminEmail: e.target.value }))} style={inputStyle} placeholder="jane@acme.com" />
             </div>
-            <div>
-              <label className="text-sm text-steel">Admin temporary password</label>
-              <input value={form.adminPassword} onChange={(e) => setForm((f) => ({ ...f, adminPassword: e.target.value }))} style={inputStyle} placeholder="At least 8 characters" />
-            </div>
           </div>
+          <p className="text-sm text-steel" style={{ margin: "0 0 0.9rem" }}>A temporary password is generated automatically and shown here after you create the organization.</p>
           <button className="btn btn-gold" disabled={submitting}>{submitting ? "Creating…" : "Create Organization"}</button>
         </form>
       </div>

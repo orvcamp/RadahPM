@@ -5,4 +5,4 @@
 // defaults to "MangoDoe".
 
 export const APP_NAME = import.meta.env.VITE_APP_NAME || "MangoDoe";
-export const APP_TAGLINE = import.meta.env.VITE_APP_TAGLINE || "Project Platform";
+export const APP_TAGLINE = import.meta.env.VITE_APP_TAGLINE || "Ripe Insights | Real Results";

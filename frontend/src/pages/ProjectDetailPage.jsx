@@ -80,21 +80,28 @@ function AddMemberInline({ projectId, onAdded }) {
   }
 
   return (
-    <form onSubmit={submit} style={{ display: "flex", gap: "0.6rem", marginBottom: "1rem", flexWrap: "wrap" }}>
-      <select value={userId} onChange={(e) => setUserId(e.target.value)} style={{ flex: 1, minWidth: 200, border: "1.5px solid var(--line)", borderRadius: "6px", padding: "0.55rem 0.8rem", fontSize: "0.88rem" }}>
-        <option value="">Select a client or trade partner...</option>
-        {users.map((u) => (
-          <option key={u.id} value={u.id}>{u.fullName} — {u.email} ({u.role})</option>
-        ))}
-      </select>
-      <select value={membershipRole} onChange={(e) => setMembershipRole(e.target.value)} style={{ border: "1.5px solid var(--line)", borderRadius: "6px", padding: "0.55rem 0.8rem", fontSize: "0.88rem" }}>
-        <option value="owner_contact">Owner Contact</option>
-        <option value="project_manager">Project Manager</option>
-        <option value="trade_partner">Trade Partner</option>
-        <option value="viewer">Viewer</option>
-      </select>
-      <button className="btn btn-outline btn-sm" disabled={adding}>{adding ? "Adding..." : "+ Add to Project"}</button>
-    </form>
+    <>
+      {users.length === 0 && (
+        <div className="text-sm text-steel" style={{ marginBottom: "0.8rem", padding: "0.7rem 0.9rem", background: "var(--paper, #f7f6f2)", borderRadius: 6, border: "1px solid var(--line)" }}>
+          No client or trade-partner users exist yet. Create them on the <strong>Users</strong> page first — internal staff already have access to every project, so only external members are added here.
+        </div>
+      )}
+      <form onSubmit={submit} style={{ display: "flex", gap: "0.6rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+        <select value={userId} onChange={(e) => setUserId(e.target.value)} style={{ flex: 1, minWidth: 200, border: "1.5px solid var(--line)", borderRadius: "6px", padding: "0.55rem 0.8rem", fontSize: "0.88rem" }}>
+          <option value="">Select a client or trade partner...</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>{u.fullName} — {u.email} ({u.role})</option>
+          ))}
+        </select>
+        <select value={membershipRole} onChange={(e) => setMembershipRole(e.target.value)} style={{ border: "1.5px solid var(--line)", borderRadius: "6px", padding: "0.55rem 0.8rem", fontSize: "0.88rem" }}>
+          <option value="owner_contact">Owner Contact</option>
+          <option value="project_manager">Project Manager</option>
+          <option value="trade_partner">Trade Partner</option>
+          <option value="viewer">Viewer</option>
+        </select>
+        <button className="btn btn-outline btn-sm" disabled={adding || !userId}>{adding ? "Adding..." : "+ Add to Project"}</button>
+      </form>
+    </>
   );
 }
 
