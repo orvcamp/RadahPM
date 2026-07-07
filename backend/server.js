@@ -16,6 +16,7 @@ const dailyLogRoutes = require("./routes/dailylogs");
 const platformRoutes = require("./routes/platform");
 const myModulesRoutes = require("./routes/mymodules");
 const rfiRoutes = require("./routes/rfis");
+const submittalRoutes = require("./routes/submittals");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -51,6 +52,7 @@ app.use("/api", dailyLogRoutes); // mounts /api/projects/:projectId/daily-logs a
 app.use("/api/platform", platformRoutes); // platform-admin org provisioning
 app.use("/api", myModulesRoutes); // GET /api/my-modules
 app.use("/api", rfiRoutes); // RFIs
+app.use("/api", submittalRoutes); // Submittals
 
 // 404 handler
 app.use((req, res) => {

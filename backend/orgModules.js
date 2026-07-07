@@ -14,6 +14,7 @@ const MODULES = [
   { key: "changeorders", label: "Change Orders" },
   { key: "dailylogs", label: "Daily Logs" },
   { key: "rfis", label: "RFIs" },
+  { key: "submittals", label: "Submittals" },
 ];
 const MODULE_KEYS = MODULES.map((m) => m.key);
 
