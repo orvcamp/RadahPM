@@ -12,6 +12,51 @@ import ChangeOrdersTab from "../components/ChangeOrdersTab.jsx";
 import DailyLogsTab from "../components/DailyLogsTab.jsx";
 import RfisTab from "../components/RfisTab.jsx";
 import SubmittalsTab from "../components/SubmittalsTab.jsx";
+import { STAGES, stageIndex } from "../config.js";
+
+// Horizontal lifecycle stage tracker. Admin/staff can advance/step back.
+function StageStepper({ project, canEdit, onChange }) {
+  const idx = stageIndex(project.stage);
+  const [busy, setBusy] = useState(false);
+  async function setStage(key) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const d = await api.patch(`/projects/${project.id}/stage`, { stage: key });
+      onChange(d.project);
+    } catch (err) { alert(err.message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="card" style={{ marginBottom: "1.4rem", padding: "1rem 1.1rem" }}>
+      <div className="flex-between" style={{ marginBottom: "0.7rem", flexWrap: "wrap", gap: "0.5rem" }}>
+        <span className="text-sm text-steel" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Project Stage</span>
+        {canEdit && (
+          <div style={{ display: "flex", gap: "0.4rem" }}>
+            <button className="btn btn-outline btn-sm" disabled={busy || idx === 0} onClick={() => setStage(STAGES[idx - 1].key)}>← Back</button>
+            <button className="btn btn-gold btn-sm" disabled={busy || idx >= STAGES.length - 1} onClick={() => setStage(STAGES[idx + 1].key)}>Advance →</button>
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 0, overflowX: "auto" }}>
+        {STAGES.map((s, i) => {
+          const done = i < idx, current = i === idx;
+          const dot = done ? "var(--green-deep, #2E9E5B)" : current ? "var(--gold, #C9A227)" : "var(--line, #E2E1DA)";
+          const txt = current ? "var(--navy, #0B1F3A)" : done ? "var(--green-deep, #2E9E5B)" : "var(--steel, #6b7280)";
+          return (
+            <div key={s.key} style={{ flex: 1, minWidth: 92, textAlign: "center", position: "relative", cursor: canEdit ? "pointer" : "default" }}
+                 onClick={canEdit ? () => setStage(s.key) : undefined} title={canEdit ? `Set stage: ${s.label}` : s.label}>
+              {i > 0 && <div style={{ position: "absolute", left: "-50%", top: 9, width: "100%", height: 2, background: i <= idx ? "var(--green-deep, #2E9E5B)" : "var(--line, #E2E1DA)" }} />}
+              <div style={{ position: "relative", width: 20, height: 20, borderRadius: "50%", background: dot, margin: "0 auto 6px", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, fontWeight: 700 }}>
+                {done ? "✓" : current ? "●" : ""}
+              </div>
+              <div style={{ fontSize: "0.72rem", fontWeight: current ? 700 : 400, color: txt, lineHeight: 1.2 }}>{s.label}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function AddPhaseInline({ projectId, onAdded }) {
   const [name, setName] = useState("");
@@ -192,10 +237,12 @@ export default function ProjectDetailPage() {
 
       {project.description && <p className="text-steel mt-1" style={{ marginBottom: "1.4rem" }}>{project.description}</p>}
 
+      <StageStepper project={project} canEdit={isInternal} onChange={(p) => setProject(p)} />
+
       <div className="tab-row">
         <button className={`tab-btn ${tab === "timeline" ? "active" : ""}`} onClick={() => setTab("timeline")}>Timeline</button>
         <button className={`tab-btn ${tab === "tasks" ? "active" : ""}`} onClick={() => setTab("tasks")}>Tasks</button>
-        <button className={`tab-btn ${tab === "phases" ? "active" : ""}`} onClick={() => setTab("phases")}>Phases</button>
+        <button className={`tab-btn ${tab === "phases" ? "active" : ""}`} onClick={() => setTab("phases")}>Schedule</button>
         <button className={`tab-btn ${tab === "team" ? "active" : ""}`} onClick={() => setTab("team")}>Team</button>
         {modOn("documents") && (
           <button className={`tab-btn ${tab === "documents" ? "active" : ""}`} onClick={() => setTab("documents")}>Documents</button>
@@ -294,7 +341,7 @@ export default function ProjectDetailPage() {
         <div className="card">
           {isInternal && <AddPhaseInline projectId={id} onAdded={(p) => setPhases((prev) => [...prev, p])} />}
           {phases.length === 0 ? (
-            <div className="empty-state"><h3>No phases defined</h3><p className="text-sm">Phases group tasks into stages like Design, Permitting, or Construction.</p></div>
+            <div className="empty-state"><h3>No schedule blocks yet</h3><p className="text-sm">Add schedule blocks (e.g. Sitework, Framing, Finishes) to plan and lay out the work on the timeline. This is separate from the project <strong>Stage</strong> tracker above, which shows where the whole job is right now.</p></div>
           ) : (
             <ul style={{ listStyle: "none" }}>
               {phases.map((p) => (

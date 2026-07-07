@@ -46,6 +46,7 @@ function mapProject(row) {
     actualEndDate: row.actual_end_date,
     location: row.location,
     photoKey: row.photo_key || null,
+    stage: row.stage || "lead",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -383,6 +384,26 @@ router.delete("/:id/photo", requireAuth, requireOrg, requireRole("admin", "staff
     res.json({ message: "Photo removed." });
   } catch (err) {
     console.error("[radah-pm] project photo delete error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
+// Project lifecycle stages (advanced like a stepper; distinct from status).
+const STAGE_KEYS = ["lead", "preconstruction", "mobilization", "construction", "substantial_completion", "closeout", "complete"];
+
+// PATCH /api/projects/:id/stage  { stage }  (admin/staff, org-scoped)
+router.patch("/:id/stage", requireAuth, requireOrg, requireRole("admin", "staff"), async (req, res) => {
+  const { stage } = req.body || {};
+  if (!STAGE_KEYS.includes(stage)) return res.status(400).json({ error: "Invalid stage." });
+  try {
+    const r = await pool.query(
+      "UPDATE projects SET stage = $1 WHERE id = $2 AND org_id = $3 RETURNING *",
+      [stage, req.params.id, req.user.orgId]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: "Project not found." });
+    res.json({ project: mapProject(r.rows[0]) });
+  } catch (err) {
+    console.error("[radah-pm] set project stage error:", err);
     res.status(500).json({ error: "Something went wrong." });
   }
 });

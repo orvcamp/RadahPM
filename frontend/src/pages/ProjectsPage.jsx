@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext.jsx";
+import { stageLabel } from "../config.js";
 
 const STATUS_OPTIONS = ["planning", "active", "on_hold", "completed", "cancelled"];
 
@@ -253,7 +254,7 @@ export default function ProjectsPage() {
                       title={isInternal ? "Set project photo" : undefined}>
                     <ProjectThumb project={p} />
                   </td>
-                  <td><strong>{p.name}</strong></td>
+                  <td><strong>{p.name}</strong><div className="text-sm text-steel" style={{ marginTop: 2 }}>Stage: {stageLabel(p.stage)}</div></td>
                   <td>{p.clientOrgName || "—"}</td>
                   <td><span className={`badge badge-${p.status}`}>{p.status.replace("_", " ")}</span></td>
                   <td>{p.startDate ? new Date(p.startDate).toLocaleDateString() : "—"}</td>
