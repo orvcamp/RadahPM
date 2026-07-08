@@ -71,6 +71,10 @@ function mapLine(row) {
     categoryId: row.category_id,
     categoryName: row.category_name || null,
     description: row.description,
+    costCode: row.cost_code || null,
+    quantity: row.quantity === null || row.quantity === undefined ? null : Number(row.quantity),
+    unit: row.unit || null,
+    unitCostCents: row.unit_cost_cents === null || row.unit_cost_cents === undefined ? null : Number(row.unit_cost_cents),
     budgetedCents: budgeted,
     committedCents: committed,
     actualCents: actual,
@@ -751,6 +755,136 @@ router.delete(
     } catch (err) {
       console.error("[radah-pm] delete expense error:", err);
       res.status(500).json({ error: "Something went wrong." });
+    }
+  }
+);
+
+
+// ============================================================
+// IMPORT AN ESTIMATE
+// POST /api/projects/:projectId/budget/import   (admin/staff)
+//
+// The spreadsheet is parsed and column-mapped in the browser; this endpoint
+// receives already-structured rows. It appends to the existing budget — it
+// never replaces or deletes anything.
+//
+// Body: {
+//   defaultCategory: "General",                     // used when a row has no category
+//   rows: [{ category?, costCode?, description, quantity?, unit?, unitCostCents?, budgetedCents }]
+// }
+// ============================================================
+const MAX_IMPORT_ROWS = 2000;
+
+router.post(
+  "/projects/:projectId/budget/import",
+  requireAuth,
+  requireModule("budget"),
+  requireRole("admin", "staff"),
+  guardProject,
+  async (req, res) => {
+    const { rows, defaultCategory } = req.body || {};
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ error: "No rows to import." });
+    }
+    if (rows.length > MAX_IMPORT_ROWS) {
+      return res.status(400).json({ error: `That's ${rows.length} rows. The import limit is ${MAX_IMPORT_ROWS}.` });
+    }
+
+    // Validate before touching the database, so a bad row can't half-import.
+    const cleaned = [];
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i] || {};
+      const description = String(r.description || "").trim();
+      if (!description) return res.status(400).json({ error: `Row ${i + 1} has no description.` });
+
+      const cents = Number(r.budgetedCents);
+      if (!Number.isFinite(cents) || !Number.isInteger(cents)) {
+        return res.status(400).json({ error: `Row ${i + 1} ("${description}") has an invalid amount.` });
+      }
+      const categoryName = String(r.category || defaultCategory || "").trim();
+      if (!categoryName) return res.status(400).json({ error: `Row ${i + 1} has no category, and no default category was chosen.` });
+
+      const qty = r.quantity === null || r.quantity === undefined || r.quantity === "" ? null : Number(r.quantity);
+      if (qty !== null && !Number.isFinite(qty)) return res.status(400).json({ error: `Row ${i + 1} has an invalid quantity.` });
+
+      const unitCents = r.unitCostCents === null || r.unitCostCents === undefined || r.unitCostCents === "" ? null : Number(r.unitCostCents);
+      if (unitCents !== null && !Number.isInteger(unitCents)) return res.status(400).json({ error: `Row ${i + 1} has an invalid unit cost.` });
+
+      cleaned.push({
+        categoryName,
+        costCode: r.costCode ? String(r.costCode).trim().slice(0, 60) : null,
+        description: description.slice(0, 500),
+        quantity: qty,
+        unit: r.unit ? String(r.unit).trim().slice(0, 20) : null,
+        unitCostCents: unitCents,
+        budgetedCents: cents,
+      });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Find-or-create each category once.
+      const categoryIds = new Map();
+      let categoriesCreated = 0;
+      const uniqueNames = [...new Set(cleaned.map((r) => r.categoryName))];
+      for (const name of uniqueNames) {
+        const found = await client.query(
+          "SELECT id FROM budget_categories WHERE project_id = $1 AND name = $2",
+          [req.params.projectId, name]
+        );
+        if (found.rows[0]) {
+          categoryIds.set(name, found.rows[0].id);
+        } else {
+          const sort = await client.query(
+            "SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM budget_categories WHERE project_id = $1",
+            [req.params.projectId]
+          );
+          const ins = await client.query(
+            "INSERT INTO budget_categories (project_id, name, sort_order) VALUES ($1, $2, $3) RETURNING id",
+            [req.params.projectId, name, sort.rows[0].n]
+          );
+          categoryIds.set(name, ins.rows[0].id);
+          categoriesCreated++;
+        }
+      }
+
+      // Append lines after whatever already exists.
+      const startSort = await client.query(
+        "SELECT COALESCE(MAX(sort_order), 0) AS n FROM budget_lines WHERE project_id = $1",
+        [req.params.projectId]
+      );
+      let sortOrder = Number(startSort.rows[0].n);
+      let totalCents = 0;
+
+      for (const r of cleaned) {
+        sortOrder += 1;
+        totalCents += r.budgetedCents;
+        await client.query(
+          `INSERT INTO budget_lines
+             (project_id, category_id, description, cost_code, quantity, unit, unit_cost_cents, budgeted_amount_cents, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [
+            req.params.projectId, categoryIds.get(r.categoryName), r.description,
+            r.costCode, r.quantity, r.unit, r.unitCostCents, r.budgetedCents, sortOrder,
+          ]
+        );
+      }
+
+      await client.query("COMMIT");
+      res.status(201).json({
+        message: `Imported ${cleaned.length} budget line${cleaned.length === 1 ? "" : "s"}.`,
+        linesCreated: cleaned.length,
+        categoriesCreated,
+        totalCents,
+      });
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("[radah-pm] estimate import error:", err);
+      res.status(500).json({ error: "The import failed and nothing was changed." });
+    } finally {
+      client.release();
     }
   }
 );

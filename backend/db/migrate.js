@@ -48,6 +48,7 @@ async function migrate() {
     await runSqlFile("migrations_phase3_token_version.sql", "Migration (session revocation)");
     await runSqlFile("migrations_phase3_notifications.sql", "Migration (notifications)");
     await runSqlFile("migrations_phase3_logs.sql", "Migration (project logs)");
+    await runSqlFile("migrations_phase3_budget_estimate.sql", "Migration (estimate fields on budget lines)");
   } finally {
     await pool.end();
   }

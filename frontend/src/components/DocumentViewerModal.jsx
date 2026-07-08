@@ -6,6 +6,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { api } from "../api/client";
+import { loadSheetJS } from "../lib/sheetjs.js";
 
 const SHEET_EXT = /\.(xlsx|xlsm|xlsb|xls|csv|ods)$/;
 const SHEET_CT = [
@@ -26,26 +27,6 @@ export function canPreview(contentType, fileName) {
   if (/\.(png|jpe?g|gif|webp|svg|bmp)$/.test(name)) return "image";
   if (/\.(txt|md|log|json)$/.test(name)) return "text";
   return null;
-}
-
-// SheetJS is loaded from its official CDN at runtime, on first use.
-//
-// Why not an npm dependency? The `xlsx` package on the public npm registry is
-// stale (0.18.5); SheetJS distributes current builds from cdn.sheetjs.com. This
-// keeps the build free of a vendored tarball and means no local Node toolchain
-// is required to ship. The version is pinned in the URL, and the module is
-// cached by the browser after the first spreadsheet is opened.
-const SHEETJS_URL = "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs";
-let sheetJsPromise = null;
-function loadSheetJS() {
-  if (!sheetJsPromise) {
-    // @vite-ignore keeps the bundler from trying to resolve this at build time.
-    sheetJsPromise = import(/* @vite-ignore */ SHEETJS_URL).catch((e) => {
-      sheetJsPromise = null; // allow a retry on the next attempt
-      throw new Error("Could not load the spreadsheet viewer. Check your connection and try again.");
-    });
-  }
-  return sheetJsPromise;
 }
 
 // Guard rails so a 50,000-row workbook doesn't hang the browser.

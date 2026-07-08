@@ -9,6 +9,7 @@
 
 import { useEffect, useState, useCallback, Fragment } from "react";
 import { api } from "../api/client";
+import EstimateImportModal from "./EstimateImportModal.jsx";
 
 // ---------- money helpers (UI works in dollars; API works in cents) ----------
 function fmtMoney(cents) {
@@ -311,6 +312,7 @@ export default function BudgetTab({ projectId }) {
   const [commitmentModal, setCommitmentModal] = useState(null); // null | {line} | {line, commitment}
   const [expenseModal, setExpenseModal] = useState(null); // null | {line} | {line, expense}
   const [showCats, setShowCats] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [newCat, setNewCat] = useState("");
   const [seeding, setSeeding] = useState(false);
 
@@ -437,7 +439,10 @@ export default function BudgetTab({ projectId }) {
       {canEdit && (
         <div className="flex-between" style={{ marginBottom: "1rem", flexWrap: "wrap", gap: "0.6rem" }}>
           <button className="btn btn-outline btn-sm" onClick={() => setShowCats((s) => !s)}>{showCats ? "Hide Categories" : "Manage Categories"}</button>
-          <button className="btn btn-gold" onClick={() => setLineModal({})}>+ Add Budget Line</button>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button className="btn btn-outline btn-sm" onClick={() => setImportOpen(true)}>Import Estimate</button>
+            <button className="btn btn-gold" onClick={() => setLineModal({})}>+ Add Budget Line</button>
+          </div>
         </div>
       )}
 
@@ -500,6 +505,15 @@ export default function BudgetTab({ projectId }) {
           </tbody>
         </table>
       </div>
+
+      {importOpen && (
+        <EstimateImportModal
+          projectId={projectId}
+          categories={categories}
+          onClose={() => setImportOpen(false)}
+          onImported={() => load()}
+        />
+      )}
 
       {lineModal !== null && (
         <LineModal
@@ -564,7 +578,13 @@ function GroupRows({
             <tr className="clickable" onClick={() => setExpanded(isOpen ? null : l.id)}>
               <td style={{ textAlign: "center", color: "var(--steel)" }}>{isOpen ? "▾" : "▸"}</td>
               <td>
-                <strong>{l.description}</strong>
+                <strong>{l.costCode ? `${l.costCode} — ` : ""}{l.description}</strong>
+                {((l.quantity !== null && l.quantity !== undefined) || (l.unitCostCents !== null && l.unitCostCents !== undefined)) && (
+                  <div className="text-steel" style={{ fontSize: "0.72rem" }}>
+                    {l.quantity !== null && l.quantity !== undefined ? `${l.quantity}${l.unit ? ` ${l.unit}` : ""}` : ""}
+                    {l.unitCostCents !== null && l.unitCostCents !== undefined ? ` @ ${fmtMoney(l.unitCostCents)}` : ""}
+                  </div>
+                )}
                 <UsageBar budgeted={l.budgetedCents} committed={l.committedCents} actual={l.actualCents} />
               </td>
               <td style={{ textAlign: "right" }}>{fmtMoney(l.budgetedCents)}</td>
