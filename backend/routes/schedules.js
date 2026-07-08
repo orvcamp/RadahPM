@@ -157,4 +157,147 @@ router.delete("/project-schedules/:id", requireAuth, requireRole("admin", "staff
   }
 });
 
+
+// ============================================================
+// SCHEDULE ACTIVITIES — a read-only mirror of the issued schedule.
+//
+// Activities are parsed in the browser (MS Project XML via DOMParser, or a
+// spreadsheet via SheetJS) and posted here already structured. Importing
+// REPLACES the activity set: a schedule update is a re-baseline, not an append.
+//
+// This is deliberately not a scheduling engine. No critical path is calculated.
+// ============================================================
+const MAX_ACTIVITIES = 5000;
+
+// GET /api/projects/:projectId/schedule-activities
+router.get("/projects/:projectId/schedule-activities", requireAuth, guardProject, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT sa.*, u.full_name AS imported_by_name
+         FROM schedule_activities sa
+         LEFT JOIN users u ON u.id = sa.imported_by
+        WHERE sa.project_id = $1
+        ORDER BY sa.sort_order ASC`,
+      [req.params.projectId]
+    );
+    const activities = r.rows.map((a) => ({
+      id: a.id,
+      externalId: a.external_id,
+      wbs: a.wbs,
+      name: a.name,
+      startDate: a.start_date,
+      finishDate: a.finish_date,
+      durationDays: a.duration_days === null ? null : Number(a.duration_days),
+      percentComplete: a.percent_complete,
+      isMilestone: a.is_milestone,
+      isSummary: a.is_summary,
+      outlineLevel: a.outline_level,
+      predecessors: a.predecessors,
+    }));
+    res.json({
+      activities,
+      importedAt: r.rows[0] ? r.rows[0].imported_at : null,
+      importedByName: r.rows[0] ? r.rows[0].imported_by_name : null,
+      canManage: isInternal(req.user),
+    });
+  } catch (err) {
+    console.error("[radah-pm] list schedule activities error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
+// POST /api/projects/:projectId/schedule-activities/import   (admin/staff)
+// Body: { activities: [{ externalId, wbs, name, startDate, finishDate, durationDays,
+//                        percentComplete, isMilestone, isSummary, outlineLevel, predecessors }] }
+router.post(
+  "/projects/:projectId/schedule-activities/import",
+  requireAuth,
+  requireRole("admin", "staff"),
+  guardProject,
+  async (req, res) => {
+    const { activities } = req.body || {};
+    if (!Array.isArray(activities) || activities.length === 0) {
+      return res.status(400).json({ error: "No activities to import." });
+    }
+    if (activities.length > MAX_ACTIVITIES) {
+      return res.status(400).json({ error: `That's ${activities.length} activities. The import limit is ${MAX_ACTIVITIES}.` });
+    }
+
+    // Validate everything before touching the database.
+    const cleaned = [];
+    for (let i = 0; i < activities.length; i++) {
+      const a = activities[i] || {};
+      const name = String(a.name || "").trim();
+      if (!name) return res.status(400).json({ error: `Activity ${i + 1} has no name.` });
+
+      const pct = a.percentComplete === null || a.percentComplete === undefined || a.percentComplete === "" ? 0 : Number(a.percentComplete);
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+        return res.status(400).json({ error: `Activity ${i + 1} ("${name}") has an invalid % complete.` });
+      }
+      const dur = a.durationDays === null || a.durationDays === undefined || a.durationDays === "" ? null : Number(a.durationDays);
+      if (dur !== null && !Number.isFinite(dur)) {
+        return res.status(400).json({ error: `Activity ${i + 1} ("${name}") has an invalid duration.` });
+      }
+
+      cleaned.push({
+        externalId: a.externalId ? String(a.externalId).slice(0, 40) : null,
+        wbs: a.wbs ? String(a.wbs).slice(0, 60) : null,
+        name: name.slice(0, 400),
+        startDate: a.startDate || null,
+        finishDate: a.finishDate || null,
+        durationDays: dur,
+        percentComplete: Math.round(pct),
+        isMilestone: a.isMilestone === true,
+        isSummary: a.isSummary === true,
+        outlineLevel: Number.isFinite(Number(a.outlineLevel)) ? Number(a.outlineLevel) : null,
+        predecessors: a.predecessors ? String(a.predecessors).slice(0, 200) : null,
+      });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      // Re-baseline: the previous activity set is replaced wholesale.
+      await client.query("DELETE FROM schedule_activities WHERE project_id = $1", [req.params.projectId]);
+
+      let sort = 0;
+      for (const a of cleaned) {
+        sort += 1;
+        await client.query(
+          `INSERT INTO schedule_activities
+             (project_id, external_id, wbs, name, start_date, finish_date, duration_days,
+              percent_complete, is_milestone, is_summary, outline_level, predecessors, sort_order, imported_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+          [
+            req.params.projectId, a.externalId, a.wbs, a.name, a.startDate, a.finishDate, a.durationDays,
+            a.percentComplete, a.isMilestone, a.isSummary, a.outlineLevel, a.predecessors, sort, req.user.id,
+          ]
+        );
+      }
+      await client.query("COMMIT");
+      res.status(201).json({
+        message: `Imported ${cleaned.length} activit${cleaned.length === 1 ? "y" : "ies"}. The previous schedule was replaced.`,
+        activitiesCreated: cleaned.length,
+      });
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("[radah-pm] schedule activity import error:", err);
+      res.status(500).json({ error: "The import failed and nothing was changed." });
+    } finally {
+      client.release();
+    }
+  }
+);
+
+// DELETE /api/projects/:projectId/schedule-activities   (admin/staff)
+router.delete("/projects/:projectId/schedule-activities", requireAuth, requireRole("admin", "staff"), guardProject, async (req, res) => {
+  try {
+    await pool.query("DELETE FROM schedule_activities WHERE project_id = $1", [req.params.projectId]);
+    res.json({ message: "Imported schedule activities cleared." });
+  } catch (err) {
+    console.error("[radah-pm] clear schedule activities error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
 module.exports = router;

@@ -13,6 +13,7 @@ import DailyLogsTab from "../components/DailyLogsTab.jsx";
 import RfisTab from "../components/RfisTab.jsx";
 import SubmittalsTab from "../components/SubmittalsTab.jsx";
 import ProjectScheduleCard from "../components/ProjectScheduleCard.jsx";
+import ScheduleActivitiesCard from "../components/ScheduleActivitiesCard.jsx";
 import TrashTab from "../components/TrashTab.jsx";
 import LogsTab from "../components/LogsTab.jsx";
 import DocumentViewerModal from "../components/DocumentViewerModal.jsx";
@@ -374,6 +375,8 @@ export default function ProjectDetailPage() {
       {tab === "phases" && (
         <>
           <ProjectScheduleCard projectId={id} onView={(s) => setViewSchedule({ id: s.documentId, fileName: s.fileName, contentType: s.contentType })} />
+
+          <ScheduleActivitiesCard projectId={id} />
           <div className="card">
             <h3 style={{ fontSize: "1rem", textTransform: "uppercase", marginBottom: "0.3rem" }}>Phases</h3>
             <p className="text-sm text-steel" style={{ marginBottom: "0.9rem" }}>
