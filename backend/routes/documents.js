@@ -24,6 +24,7 @@ const pool = require("../db/pool");
 const { requireAuth, requireRole, isInternal } = require("../middleware/auth");
 const { userCanAccessProject, resourceProjectId } = require("./projects");
 const { requireModule } = require("../orgModules");
+const { notifyProject } = require("../notify");
 const r2 = require("../db/r2");
 
 const router = express.Router();
@@ -190,6 +191,16 @@ router.post(
          LEFT JOIN users u ON u.id = d.uploaded_by WHERE d.id = $1`,
         [result.rows[0].id]
       );
+      await notifyProject({
+        projectId: req.params.projectId,
+        orgId: req.user.orgId,
+        actorId: req.user.id,
+        actorName: req.user.fullName,
+        type: "document.uploaded",
+        title: `New document: ${fileName}`,
+        body: `${req.user.fullName || "Someone"} uploaded a document.`,
+        tab: "documents",
+      });
       res.status(201).json({ document: mapDocument(withName.rows[0]) });
     } catch (err) {
       console.error("[radah-pm] confirm document error:", err);
@@ -480,16 +491,19 @@ router.patch("/documents/:id", requireAuth, async (req, res) => {
 // ============================================================
 const FOLDER_TEMPLATE = [
   { name: "00 - Project Management", children: ["Contacts & Directory", "Meeting Minutes", "Correspondence", "Schedules"] },
-  { name: "01 - Preconstruction & Contracts", children: ["Contracts & Agreements", "Bonds & Insurance", "Permits & Approvals", "Proposals & Estimates"] },
+  { name: "01 - Preconstruction & Contracts", children: ["Contracts & Agreements", "Bonds & Insurance", "Permits & Approvals", "Permit Log", "Proposals & Estimates"] },
   { name: "02 - Drawings & Specifications", children: ["Contract Drawings (For Construction)", "Shop Drawings", "As-Builts", "Specifications", "Superseded"] },
   { name: "03 - Submittals", children: [] },
   { name: "04 - RFIs", children: [] },
-  { name: "05 - Change Management", children: ["Change Orders", "Potential Change Orders (PCOs)", "Construction Change Directives"] },
+  { name: "05 - Change Management", children: ["Change Orders", "Potential Change Orders (PCOs)", "Construction Change Directives", "Change Log"] },
   { name: "06 - Cost & Billing", children: ["Budget", "Pay Applications", "Invoices", "Lien Waivers"] },
   { name: "07 - Field & Logs", children: ["Daily Logs", "Site Photos", "Delivery Logs", "Visitor Logs", "Equipment Logs", "Weather Logs"] },
   { name: "08 - Safety", children: ["Safety Plans", "Incident Reports", "Toolbox Talks & JHAs", "Safety Inspections"] },
-  { name: "09 - Quality (QA-QC)", children: ["Inspection Reports", "Test Reports", "Punch Lists", "Deficiency Logs"] },
-  { name: "10 - Closeout", children: ["Warranties", "O&M Manuals", "As-Built Record Set", "Final Certificates & Permits", "Training"] },
+  { name: "09 - Quality (QA-QC)", children: ["Inspection Reports", "Inspection Log", "Test Reports", "Punch Lists", "Punch List Log", "Deficiency Logs"] },
+  { name: "10 - Closeout", children: ["Warranties", "Warranty Log", "Asset Log", "O&M Manuals", "As-Built Record Set", "Final Certificates & Permits", "Training"] },
+  { name: "11 - Subcontractors", children: ["Prequalification", "Subcontracts", "Certificates of Insurance", "W-9s & Compliance", "Scopes of Work", "Subcontractor Directory"] },
+  { name: "12 - Procurement", children: ["Procurement Log", "Long Lead Item Log", "Purchase Orders", "Vendor Quotes", "Material Deliveries"] },
+  { name: "13 - Logs & Registers", children: ["Action Log", "Risk Register", "Issue Log", "Decision Log", "Assumption Log", "Constraint Log", "Opportunity Log", "Open Items Log", "Lessons Learned Log", "Stakeholder Log", "Meeting Log", "Correspondence Log"] },
 ];
 
 router.post(

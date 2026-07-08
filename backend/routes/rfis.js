@@ -15,6 +15,7 @@ const pool = require("../db/pool");
 const { requireAuth, requireRole, isInternal } = require("../middleware/auth");
 const { userCanAccessProject, resourceProjectId } = require("./projects");
 const { requireModule } = require("../orgModules");
+const { notifyProject } = require("../notify");
 const r2 = require("../db/r2");
 
 const router = express.Router();
@@ -173,7 +174,18 @@ router.post("/projects/:projectId/rfis", requireAuth, requireModule("rfis"), gua
        VALUES ($1,$2,$3,$4,$5,$6,'open',$7) RETURNING id`,
       [req.params.projectId, numRes.rows[0].next, subject.trim(), question || null, dueDate || null, assignedTo || null, req.user.id]
     );
-    res.status(201).json({ rfi: await fetchRfi(ins.rows[0].id) });
+    const created = await fetchRfi(ins.rows[0].id);
+    await notifyProject({
+      projectId: req.params.projectId,
+      orgId: req.user.orgId,
+      actorId: req.user.id,
+      actorName: req.user.fullName,
+      type: "rfi.raised",
+      title: `RFI #${created.rfiNumber} raised: ${created.subject}`,
+      body: `${req.user.fullName || "Someone"} raised an RFI${created.dueDate ? ` (due ${new Date(created.dueDate).toLocaleDateString()})` : ""}.`,
+      tab: "rfis",
+    });
+    res.status(201).json({ rfi: created });
   } catch (err) {
     if (err.code === "23505") return res.status(409).json({ error: "RFI number collision — please retry." });
     console.error("[radah-pm] create rfi error:", err);
@@ -242,7 +254,20 @@ router.post("/rfis/:id/transition", requireAuth, requireModule("rfis"), guardRes
       if (rfi.status === "open") return res.status(409).json({ error: "RFI is already open." });
       await pool.query("UPDATE rfis SET status = 'open' WHERE id = $1", [rfi.id]);
     }
-    res.json({ rfi: await fetchRfi(req.params.id) });
+    const updated = await fetchRfi(req.params.id);
+    if (action === "answer") {
+      await notifyProject({
+        projectId: rfi.project_id,
+        orgId: req.user.orgId,
+        actorId: req.user.id,
+        actorName: req.user.fullName,
+        type: "rfi.answered",
+        title: `RFI #${updated.rfiNumber} answered`,
+        body: `${req.user.fullName || "Someone"} answered: ${updated.subject}`,
+        tab: "rfis",
+      });
+    }
+    res.json({ rfi: updated });
   } catch (err) {
     console.error("[radah-pm] rfi transition error:", err);
     res.status(500).json({ error: "Something went wrong." });

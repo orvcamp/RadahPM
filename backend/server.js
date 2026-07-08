@@ -21,6 +21,7 @@ const rfiRoutes = require("./routes/rfis");
 const submittalRoutes = require("./routes/submittals");
 const scheduleRoutes = require("./routes/schedules");
 const trashRoutes = require("./routes/trash");
+const notificationRoutes = require("./routes/notifications");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -68,6 +69,7 @@ app.use("/api", rfiRoutes); // RFIs
 app.use("/api", submittalRoutes); // Submittals
 app.use("/api", scheduleRoutes); // Project schedule files
 app.use("/api", trashRoutes); // Deleted Items (restore / purge)
+app.use("/api", notificationRoutes); // In-app notifications
 
 // 404 handler
 app.use((req, res) => {

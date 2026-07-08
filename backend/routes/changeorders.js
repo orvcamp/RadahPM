@@ -25,6 +25,7 @@ const { requireAuth, requireRole, isInternal } = require("../middleware/auth");
 const { userCanAccessProject, resourceProjectId } = require("./projects");
 const { requireModule } = require("../orgModules");
 const r2 = require("../db/r2");
+const { notifyProject } = require("../notify");
 
 const router = express.Router();
 
@@ -451,6 +452,26 @@ router.post("/change-orders/:id/transition", requireAuth, guardResource("change_
 
     await client.query("COMMIT");
     const updated = await fetchChangeOrder(req.params.id);
+
+    // Trade partners have no access to change orders, so they're never told.
+    const NOTIFY = {
+      submit: { type: "changeorder.submitted", verb: "submitted for decision" },
+      approve: { type: "changeorder.approved", verb: "approved" },
+      reject: { type: "changeorder.rejected", verb: "rejected" },
+    };
+    if (NOTIFY[action]) {
+      await notifyProject({
+        projectId: co.project_id,
+        orgId: req.user.orgId,
+        actorId: req.user.id,
+        actorName: req.user.fullName,
+        type: NOTIFY[action].type,
+        title: `CO #${updated.coNumber} ${NOTIFY[action].verb}: ${updated.title}`,
+        body: `${req.user.fullName || "Someone"} ${NOTIFY[action].verb} this change order.`,
+        tab: "changeorders",
+        excludeRoles: ["trade_partner"],
+      });
+    }
     res.json({ changeOrder: updated });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});

@@ -17,6 +17,7 @@ const pool = require("../db/pool");
 const { requireAuth, requireRole, isInternal } = require("../middleware/auth");
 const { userCanAccessProject, resourceProjectId } = require("./projects");
 const { requireModule } = require("../orgModules");
+const { notifyProject } = require("../notify");
 const r2 = require("../db/r2");
 
 const router = express.Router();
@@ -226,7 +227,21 @@ router.post("/submittals/:id/transition", requireAuth, requireModule("submittals
       if (sub.status !== "returned") return res.status(409).json({ error: "Only returned submittals can be reopened." });
       await pool.query("UPDATE submittals SET status='under_review', disposition=NULL WHERE id=$1", [sub.id]);
     }
-    res.json({ submittal: await fetchSubmittal(req.params.id) });
+    const updated = await fetchSubmittal(req.params.id);
+    if (action === "return") {
+      const DISP = { approved: "Approved", approved_as_noted: "Approved as Noted", revise_resubmit: "Revise & Resubmit", rejected: "Rejected" };
+      await notifyProject({
+        projectId: sub.project_id,
+        orgId: req.user.orgId,
+        actorId: req.user.id,
+        actorName: req.user.fullName,
+        type: "submittal.returned",
+        title: `Submittal #${updated.submittalNumber}${updated.revision ? ` Rev ${updated.revision}` : ""} returned: ${DISP[updated.disposition] || "Returned"}`,
+        body: updated.title,
+        tab: "submittals",
+      });
+    }
+    res.json({ submittal: updated });
   } catch (err) {
     console.error("[radah-pm] submittal transition error:", err);
     res.status(500).json({ error: "Something went wrong." });

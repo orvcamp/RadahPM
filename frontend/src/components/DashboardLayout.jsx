@@ -3,6 +3,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { APP_NAME, APP_TAGLINE } from "../config.js";
+import NotificationBell from "./NotificationBell.jsx";
 
 const ROLE_LABELS = {
   admin: "Administrator",
@@ -60,6 +61,9 @@ export default function DashboardLayout() {
       </aside>
 
       <main className="main-content">
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.6rem" }}>
+          <NotificationBell />
+        </div>
         <Outlet />
       </main>
     </div>

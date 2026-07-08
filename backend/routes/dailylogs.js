@@ -19,6 +19,7 @@ const { requireAuth, requireRole, isInternal } = require("../middleware/auth");
 const { userCanAccessProject, resourceProjectId } = require("./projects");
 const r2 = require("../db/r2");
 const mail = require("../mail");
+const { notifyProject } = require("../notify");
 const APP_NAME = process.env.APP_NAME || "MangoDoe";
 const { requireModule } = require("../orgModules");
 
@@ -307,7 +308,18 @@ router.post("/projects/:projectId/daily-logs", requireAuth, async (req, res) => 
       [logId]
     );
     const mp = await manpowerFor([logId]);
-    res.status(201).json({ log: mapLog(withName.rows[0], [], mp[logId] || []) });
+    const created = mapLog(withName.rows[0], [], mp[logId] || []);
+    await notifyProject({
+      projectId: req.params.projectId,
+      orgId: req.user.orgId,
+      actorId: req.user.id,
+      actorName: req.user.fullName,
+      type: "dailylog.filed",
+      title: `Daily log filed for ${new Date(created.logDate).toLocaleDateString()}`,
+      body: `${req.user.fullName || "Someone"} filed a daily log.`,
+      tab: "dailylogs",
+    });
+    res.status(201).json({ log: created });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     if (err && /must be/.test(err.message)) return res.status(400).json({ error: err.message });

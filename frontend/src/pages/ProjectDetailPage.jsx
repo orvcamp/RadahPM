@@ -1,7 +1,7 @@
 // src/pages/ProjectDetailPage.jsx
 
 import { useEffect, useState, useCallback } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext.jsx";
 import GanttChart from "../components/GanttChart.jsx";
@@ -162,7 +162,9 @@ export default function ProjectDetailPage() {
   const [phases, setPhases] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [members, setMembers] = useState([]);
-  const [tab, setTab] = useState("timeline");
+  const [searchParams] = useSearchParams();
+  const initialTab = searchParams.get("tab") || "timeline";
+  const [tab, setTab] = useState(initialTab);
   const [modules, setModules] = useState(null); // enabled capability modules for this org
 
   useEffect(() => {
