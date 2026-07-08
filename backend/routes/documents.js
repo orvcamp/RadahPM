@@ -215,6 +215,11 @@ router.get("/documents/:id/download-url", requireAuth, requireR2, async (req, re
     }
     const downloadUrl = await r2.getDownloadUrl(doc.storage_key, doc.file_name);
     res.json({ downloadUrl });
+  } catch (err) {
+    console.error("[radah-pm] download-url error:", err);
+    res.status(500).json({ error: "Could not prepare the download. Please try again." });
+  }
+});
 
 /**
  * GET /api/documents/:id/view-url
@@ -234,10 +239,6 @@ router.get("/documents/:id/view-url", requireAuth, requireR2, async (req, res) =
   } catch (err) {
     console.error("[radah-pm] view url error:", err);
     res.status(500).json({ error: "Could not open the document." });
-  }
-});  } catch (err) {
-    console.error("[radah-pm] download-url error:", err);
-    res.status(500).json({ error: "Could not prepare the download. Please try again." });
   }
 });
 
