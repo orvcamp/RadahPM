@@ -23,6 +23,7 @@ const TYPES = {
   rfis:          { table: "rfis",          label: "RFI" },
   submittals:    { table: "submittals",    label: "Submittal" },
   change_orders: { table: "change_orders", label: "Change Order" },
+  project_logs:  { table: "project_logs",  label: "Log Entry" },
 };
 
 function guardProject(req, res, next) {
@@ -35,7 +36,7 @@ function guardProject(req, res, next) {
 router.get("/projects/:projectId/trash", requireAuth, requireRole("admin"), guardProject, async (req, res) => {
   const pid = req.params.projectId;
   try {
-    const [docs, logs, rfis, subs, cos] = await Promise.all([
+    const [docs, logs, rfis, subs, cos, plogs] = await Promise.all([
       pool.query(
         `SELECT d.id, d.file_name AS title, d.deleted_at, u.full_name AS deleted_by_name
            FROM documents d LEFT JOIN users u ON u.id = d.deleted_by
@@ -56,6 +57,10 @@ router.get("/projects/:projectId/trash", requireAuth, requireRole("admin"), guar
         `SELECT co.id, ('CO #' || co.co_number || ' — ' || co.title) AS title, co.deleted_at, u.full_name AS deleted_by_name
            FROM change_orders co LEFT JOIN users u ON u.id = co.deleted_by
           WHERE co.project_id = $1 AND co.deleted_at IS NOT NULL ORDER BY co.deleted_at DESC`, [pid]),
+      pool.query(
+        `SELECT pl.id, (pl.log_type || ' #' || pl.entry_number || ' — ' || pl.title) AS title, pl.deleted_at, u.full_name AS deleted_by_name
+           FROM project_logs pl LEFT JOIN users u ON u.id = pl.deleted_by
+          WHERE pl.project_id = $1 AND pl.deleted_at IS NOT NULL ORDER BY pl.deleted_at DESC`, [pid]),
     ]);
 
     const pack = (type, rows) =>
@@ -74,6 +79,7 @@ router.get("/projects/:projectId/trash", requireAuth, requireRole("admin"), guar
       ...pack("rfis", rfis.rows),
       ...pack("submittals", subs.rows),
       ...pack("change_orders", cos.rows),
+      ...pack("project_logs", plogs.rows),
     ].sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt));
 
     res.json({ items });

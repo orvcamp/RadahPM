@@ -14,6 +14,7 @@ import RfisTab from "../components/RfisTab.jsx";
 import SubmittalsTab from "../components/SubmittalsTab.jsx";
 import ProjectScheduleCard from "../components/ProjectScheduleCard.jsx";
 import TrashTab from "../components/TrashTab.jsx";
+import LogsTab from "../components/LogsTab.jsx";
 import DocumentViewerModal from "../components/DocumentViewerModal.jsx";
 import { STAGES, stageIndex, TAB_GROUPS, TAB_LABELS, isStageRelevant } from "../config.js";
 
@@ -254,6 +255,7 @@ export default function ProjectDetailPage() {
           if (key === "dailylogs") return modOn("dailylogs");
           if (key === "rfis") return modOn("rfis");
           if (key === "submittals") return modOn("submittals");
+          if (key === "logs") return modOn("logs");
           if (key === "trash") return user.role === "admin";
           return true; // timeline, tasks, phases, team
         };
@@ -435,6 +437,8 @@ export default function ProjectDetailPage() {
       {tab === "rfis" && modOn("rfis") && <RfisTab projectId={id} />}
 
       {tab === "submittals" && modOn("submittals") && <SubmittalsTab projectId={id} />}
+
+      {tab === "logs" && modOn("logs") && <LogsTab projectId={id} />}
 
       {tab === "trash" && user.role === "admin" && <TrashTab projectId={id} />}
 

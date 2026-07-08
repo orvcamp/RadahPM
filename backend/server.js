@@ -22,6 +22,7 @@ const submittalRoutes = require("./routes/submittals");
 const scheduleRoutes = require("./routes/schedules");
 const trashRoutes = require("./routes/trash");
 const notificationRoutes = require("./routes/notifications");
+const logRoutes = require("./routes/logs");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -70,6 +71,7 @@ app.use("/api", submittalRoutes); // Submittals
 app.use("/api", scheduleRoutes); // Project schedule files
 app.use("/api", trashRoutes); // Deleted Items (restore / purge)
 app.use("/api", notificationRoutes); // In-app notifications
+app.use("/api", logRoutes); // Project logs & registers
 
 // 404 handler
 app.use((req, res) => {

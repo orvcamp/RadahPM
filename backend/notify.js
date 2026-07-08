@@ -71,4 +71,36 @@ async function notifyProject(opts) {
   }
 }
 
-module.exports = { notifyProject };
+/**
+ * Notify one specific person (e.g. "you were assigned an action item").
+ * Same guarantees as notifyProject: never throws, never notifies the actor.
+ */
+async function notifyUser(opts) {
+  const { userId, projectId, orgId, actorId, actorName, type, title, body = null, tab = null } = opts || {};
+  if (!userId || !orgId || !type || !title) return;
+  if (actorId && userId === actorId) return; // don't notify yourself
+
+  try {
+    const ok = await pool.query(
+      "SELECT 1 FROM users WHERE id = $1 AND org_id = $2 AND is_active = TRUE",
+      [userId, orgId]
+    );
+    if (ok.rows.length === 0) return;
+
+    let projectName = null;
+    if (projectId) {
+      const proj = await pool.query("SELECT name FROM projects WHERE id = $1", [projectId]);
+      projectName = proj.rows[0] ? proj.rows[0].name : null;
+    }
+
+    await pool.query(
+      `INSERT INTO notifications (user_id, org_id, project_id, project_name, type, title, body, tab, actor_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [userId, orgId, projectId || null, projectName, type, title, body, tab, actorName || null]
+    );
+  } catch (err) {
+    console.error("[radah-pm] notifyUser failed:", err.message);
+  }
+}
+
+module.exports = { notifyProject, notifyUser };

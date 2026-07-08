@@ -26,7 +26,7 @@ export const stageIndex = (key) => Math.max(0, STAGES.findIndex((s) => s.key ===
 // tabs, so live records are never orphaned behind a hidden tab.
 // Future modules slot in here: Billing -> "cost", Punch List/Reports -> "field".
 export const TAB_GROUPS = [
-  { key: "overview",  label: "Overview",  tabs: ["timeline", "tasks", "phases", "team", "trash"] },
+  { key: "overview",  label: "Overview",  tabs: ["timeline", "tasks", "phases", "team", "logs", "trash"] },
   { key: "documents", label: "Documents", tabs: ["documents"] },
   { key: "cost",      label: "Cost",      tabs: ["budget", "changeorders"] },
   { key: "field",     label: "Field",     tabs: ["dailylogs", "rfis", "submittals"] },
@@ -43,17 +43,20 @@ export const TAB_LABELS = {
   dailylogs: "Daily Logs",
   rfis: "RFIs",
   submittals: "Submittals",
+  logs: "Logs",
   trash: "Deleted Items",
 };
 
 // Which tabs are most relevant at each stage (highlight only — never hides).
 export const STAGE_RELEVANT_TABS = {
   lead: ["timeline", "tasks", "team", "documents"],
-  preconstruction: ["phases", "budget", "rfis", "submittals", "documents"],
-  mobilization: ["phases", "team", "submittals", "documents"],
-  construction: ["dailylogs", "rfis", "submittals", "changeorders", "budget"],
-  substantial_completion: ["changeorders", "budget", "documents", "dailylogs"],
-  closeout: ["documents", "budget", "changeorders"],
+  // "logs" is relevant once work is planned and running
+
+  preconstruction: ["logs", "phases", "budget", "rfis", "submittals", "documents"],
+  mobilization: ["logs", "phases", "team", "submittals", "documents"],
+  construction: ["logs", "dailylogs", "rfis", "submittals", "changeorders", "budget"],
+  substantial_completion: ["logs", "changeorders", "budget", "documents", "dailylogs"],
+  closeout: ["logs", "documents", "budget", "changeorders"],
   complete: ["documents", "budget"],
 };
 export const isStageRelevant = (stage, tabKey) =>
