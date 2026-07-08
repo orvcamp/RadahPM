@@ -7,6 +7,7 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const pool = require("../db/pool");
 const { requireAuth, requireRole, requireOrg, revokeUserSessions } = require("../middleware/auth");
+const { sendInviteEmail } = require("../invites");
 
 const router = express.Router();
 
@@ -74,10 +75,24 @@ router.post("/", requireAuth, requireOrg, requireRole("admin", "staff"), async (
       [email.toLowerCase().trim(), passwordHash, fullName, role, companyName || null, phone || null, req.user.orgId]
     );
 
+    // Invite the new user with a "set your password" link (no password emailed).
+    const orgRes = await pool.query("SELECT name FROM organizations WHERE id = $1", [req.user.orgId]);
+    const invite = await sendInviteEmail({
+      userId: result.rows[0].id,
+      email: result.rows[0].email,
+      fullName: result.rows[0].full_name,
+      orgName: orgRes.rows[0] ? orgRes.rows[0].name : null,
+      invitedByName: req.user.fullName || null,
+    });
+
     res.status(201).json({
       user: publicUser(result.rows[0]),
+      inviteEmailSent: invite.sent,
+      inviteEmailError: invite.sent ? null : invite.reason || null,
       temporaryPassword: tempPassword,
-      note: "Share this temporary password with the user through a secure channel. They should change it after first login.",
+      note: invite.sent
+        ? "An invite email with a set-password link was sent. The temporary password below is a fallback only."
+        : "Email wasn't sent — share this temporary password through a secure channel.",
     });
   } catch (err) {
     console.error("[radah-pm] create user error:", err);

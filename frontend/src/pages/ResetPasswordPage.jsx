@@ -9,6 +9,7 @@ export default function ResetPasswordPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const token = params.get("token") || "";
+  const isInvite = params.get("invite") === "1";
 
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -44,7 +45,7 @@ export default function ResetPasswordPage() {
           <span className="name">{APP_NAME}</span>
         </div>
 
-        <h2>Set a New Password</h2>
+        <h2>{isInvite ? "Welcome — Set Your Password" : "Set a New Password"}</h2>
 
         {!token ? (
           <>
@@ -58,7 +59,7 @@ export default function ResetPasswordPage() {
           </>
         ) : (
           <>
-            <p className="subtitle">Choose a new password for your account.</p>
+            <p className="subtitle">{isInvite ? "Choose a password to activate your account and sign in." : "Choose a new password for your account."}</p>
             {error && <div className="error-msg">{error}</div>}
             <form onSubmit={handleSubmit}>
               <div className="field">

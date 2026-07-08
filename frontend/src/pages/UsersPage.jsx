@@ -42,9 +42,19 @@ function NewUserModal({ onClose, onCreated }) {
           <div>
             <div className="success-msg">
               Account created for <strong>{result.user.fullName}</strong>.
+              {result.inviteEmailSent
+                ? " An invite email with a set-password link was sent to them."
+                : " No invite email was sent."}
             </div>
+            {!result.inviteEmailSent && result.inviteEmailError && (
+              <div className="error-msg">Invite email failed: {result.inviteEmailError}</div>
+            )}
             <div className="card">
-              <p className="text-sm">Share this temporary password with them through a secure channel — it won't be shown again:</p>
+              <p className="text-sm">
+                {result.inviteEmailSent
+                  ? "Fallback only — if they don't receive the email, share this temporary password securely. It won't be shown again:"
+                  : "Share this temporary password with them through a secure channel — it won't be shown again:"}
+              </p>
               <p style={{ fontFamily: "var(--font-mono)", fontSize: "1.1rem", marginTop: "0.6rem", background: "var(--off-white)", padding: "0.6rem", borderRadius: "4px" }}>
                 {result.temporaryPassword}
               </p>

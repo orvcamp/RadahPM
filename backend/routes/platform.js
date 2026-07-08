@@ -13,6 +13,7 @@ const bcrypt = require("bcryptjs");
 const pool = require("../db/pool");
 const { requireAuth, requirePlatformAdmin, revokeUserSessions } = require("../middleware/auth");
 const { getOrgModules, MODULES, MODULE_KEYS } = require("../orgModules");
+const { sendInviteEmail } = require("../invites");
 
 const router = express.Router();
 
@@ -80,6 +81,17 @@ router.post("/organizations", requireAuth, requirePlatformAdmin, async (req, res
     );
     await client.query("COMMIT");
 
+    // Welcome the new org admin with a "set your password" link (no password
+    // in the email). If mail isn't configured or the send fails, the caller
+    // falls back to the temporary password shown on screen.
+    const invite = await sendInviteEmail({
+      userId: userRes.rows[0].id,
+      email: userRes.rows[0].email,
+      fullName: userRes.rows[0].full_name,
+      orgName: orgRes.rows[0].name,
+      isOrgAdmin: true,
+    });
+
     res.status(201).json({
       organization: { id: orgId, name: orgRes.rows[0].name },
       admin: {
@@ -87,8 +99,12 @@ router.post("/organizations", requireAuth, requirePlatformAdmin, async (req, res
         email: userRes.rows[0].email,
         fullName: userRes.rows[0].full_name,
       },
+      inviteEmailSent: invite.sent,
+      inviteEmailError: invite.sent ? null : invite.reason || null,
       temporaryPassword: tempPassword,
-      note: "Share this temporary password with the org admin securely. They should change it after logging in.",
+      note: invite.sent
+        ? "A welcome email with a set-password link was sent. The temporary password below is a fallback only."
+        : "Email wasn't sent — share this temporary password with the org admin securely.",
     });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});

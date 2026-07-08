@@ -90,7 +90,16 @@ export default function PlatformAdminPage() {
         {result && (
           <div className="success-msg" style={{ marginBottom: "1rem" }}>
             Created <strong>{result.organization.name}</strong> with admin <strong>{result.admin.email}</strong>.
-            <div style={{ marginTop: "0.6rem" }}>Temporary password (share securely — they change it after first login):</div>
+            <div style={{ marginTop: "0.4rem" }}>
+              {result.inviteEmailSent
+                ? "✓ A welcome email with a set-password link was sent to them."
+                : `⚠ No welcome email was sent${result.inviteEmailError ? ` (${result.inviteEmailError})` : ""}.`}
+            </div>
+            <div style={{ marginTop: "0.6rem" }}>
+              {result.inviteEmailSent
+                ? "Fallback temporary password (only needed if the email doesn't arrive):"
+                : "Temporary password (share securely — they change it after first login):"}
+            </div>
             <div style={{ fontFamily: "monospace", fontSize: "1.05rem", background: "var(--paper, #f7f6f2)", padding: "0.55rem 0.9rem", borderRadius: 6, border: "1px solid var(--line)", wordBreak: "break-all", marginTop: "0.4rem", display: "inline-block" }}>
               {result.temporaryPassword}
             </div>
