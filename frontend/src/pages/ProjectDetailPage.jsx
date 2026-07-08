@@ -12,6 +12,8 @@ import ChangeOrdersTab from "../components/ChangeOrdersTab.jsx";
 import DailyLogsTab from "../components/DailyLogsTab.jsx";
 import RfisTab from "../components/RfisTab.jsx";
 import SubmittalsTab from "../components/SubmittalsTab.jsx";
+import ProjectScheduleCard from "../components/ProjectScheduleCard.jsx";
+import DocumentViewerModal from "../components/DocumentViewerModal.jsx";
 import { STAGES, stageIndex, TAB_GROUPS, TAB_LABELS, isStageRelevant } from "../config.js";
 
 // Horizontal lifecycle stage tracker. Admin/staff can advance/step back.
@@ -170,6 +172,7 @@ export default function ProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [taskModal, setTaskModal] = useState(null); // null | {} (new) | task (edit)
+  const [viewSchedule, setViewSchedule] = useState(null); // schedule doc being previewed
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -363,25 +366,33 @@ export default function ProjectDetailPage() {
       )}
 
       {tab === "phases" && (
-        <div className="card">
-          {isInternal && <AddPhaseInline projectId={id} onAdded={(p) => setPhases((prev) => [...prev, p])} />}
-          {phases.length === 0 ? (
-            <div className="empty-state"><h3>No schedule blocks yet</h3><p className="text-sm">Add schedule blocks (e.g. Sitework, Framing, Finishes) to plan and lay out the work on the timeline. This is separate from the project <strong>Stage</strong> tracker above, which shows where the whole job is right now.</p></div>
-          ) : (
-            <ul style={{ listStyle: "none" }}>
-              {phases.map((p) => (
-                <li key={p.id} style={{ padding: "0.7rem 0", borderBottom: "1px solid var(--line)" }}>
-                  <strong>{p.name}</strong>
-                  {(p.startDate || p.endDate) && (
-                    <span className="text-steel text-sm" style={{ marginLeft: "0.6rem" }}>
-                      {p.startDate ? new Date(p.startDate).toLocaleDateString() : "?"} – {p.endDate ? new Date(p.endDate).toLocaleDateString() : "?"}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <>
+          <ProjectScheduleCard projectId={id} onView={(s) => setViewSchedule({ id: s.documentId, fileName: s.fileName, contentType: s.contentType })} />
+          <div className="card">
+            <h3 style={{ fontSize: "1rem", textTransform: "uppercase", marginBottom: "0.3rem" }}>Phases</h3>
+            <p className="text-sm text-steel" style={{ marginBottom: "0.9rem" }}>
+              High-level buckets used to group tasks on the timeline (e.g. Sitework, Framing, Finishes).
+              These are not a CPM schedule — the issued schedule lives above.
+            </p>
+            {isInternal && <AddPhaseInline projectId={id} onAdded={(p) => setPhases((prev) => [...prev, p])} />}
+            {phases.length === 0 ? (
+              <div className="empty-state"><h3>No phases yet</h3><p className="text-sm">Add phases to group tasks on the timeline. This is separate from the project <strong>Stage</strong> tracker above, which shows where the whole job is right now.</p></div>
+            ) : (
+              <ul style={{ listStyle: "none" }}>
+                {phases.map((p) => (
+                  <li key={p.id} style={{ padding: "0.7rem 0", borderBottom: "1px solid var(--line)" }}>
+                    <strong>{p.name}</strong>
+                    {(p.startDate || p.endDate) && (
+                      <span className="text-steel text-sm" style={{ marginLeft: "0.6rem" }}>
+                        {p.startDate ? new Date(p.startDate).toLocaleDateString() : "?"} – {p.endDate ? new Date(p.endDate).toLocaleDateString() : "?"}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </>
       )}
 
       {tab === "team" && (
@@ -436,6 +447,10 @@ export default function ProjectDetailPage() {
             });
           }}
         />
+      )}
+
+      {viewSchedule && (
+        <DocumentViewerModal doc={viewSchedule} onClose={() => setViewSchedule(null)} />
       )}
     </div>
   );
