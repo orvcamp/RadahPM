@@ -54,23 +54,126 @@ function buildStorageKey(projectId, fileName) {
   return `projects/${projectId}/${crypto.randomUUID()}-${safeName}`;
 }
 
-function mapLog(row, photos) {
+function mapLog(row, photos, manpower) {
   return {
     id: row.id,
     projectId: row.project_id,
     logDate: row.log_date,
+    // site times
+    timeOnSite: row.time_on_site,
+    timeOffSite: row.time_off_site,
+    // weather
     weather: row.weather,
     temperature: row.temperature,
+    tempHigh: row.temp_high,
+    tempLow: row.temp_low,
+    precipitation: row.precipitation,
+    wind: row.wind,
+    weatherDelay: row.weather_delay === true,
+    // work
     workPerformed: row.work_performed,
+    plannedWork: row.planned_work,
     crewCount: row.crew_count,
     equipment: row.equipment,
+    // site activity
+    deliveries: row.deliveries,
+    visitors: row.visitors,
+    inspections: row.inspections,
+    // safety
+    safetyIncidents: row.safety_incidents,
+    safetyObservations: row.safety_observations,
+    toolboxTalk: row.toolbox_talk,
+    // issues
     delays: row.delays,
     notes: row.notes,
+    // meta
     createdById: row.created_by,
     createdByName: row.created_by_name || null,
     createdAt: row.created_at,
+    manpower: manpower || [],
+    // "photos" kept for backwards compatibility; these are attachments of any type
     photos: photos || [],
+    attachments: photos || [],
   };
+}
+
+// Fields shared by create + update (body key -> column).
+const LOG_FIELDS = {
+  logDate: "log_date",
+  timeOnSite: "time_on_site",
+  timeOffSite: "time_off_site",
+  weather: "weather",
+  temperature: "temperature",
+  tempHigh: "temp_high",
+  tempLow: "temp_low",
+  precipitation: "precipitation",
+  wind: "wind",
+  weatherDelay: "weather_delay",
+  workPerformed: "work_performed",
+  plannedWork: "planned_work",
+  crewCount: "crew_count",
+  equipment: "equipment",
+  deliveries: "deliveries",
+  visitors: "visitors",
+  inspections: "inspections",
+  safetyIncidents: "safety_incidents",
+  safetyObservations: "safety_observations",
+  toolboxTalk: "toolbox_talk",
+  delays: "delays",
+  notes: "notes",
+};
+
+const INT_FIELDS = new Set(["crewCount", "tempHigh", "tempLow"]);
+
+function coerce(bodyKey, value) {
+  if (value === "" || value === undefined) return null;
+  if (bodyKey === "weatherDelay") return value === true || value === "true";
+  if (INT_FIELDS.has(bodyKey)) {
+    if (value === null) return null;
+    const n = Number(value);
+    if (!Number.isInteger(n)) throw new Error(`${bodyKey} must be a whole number.`);
+    if (bodyKey === "crewCount" && n < 0) throw new Error("Crew count must be 0 or more.");
+    return n;
+  }
+  return value === null ? null : value;
+}
+
+// Replace a log's manpower rows (simple + predictable).
+async function replaceManpower(client, logId, rows) {
+  await client.query("DELETE FROM daily_log_manpower WHERE daily_log_id = $1", [logId]);
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  let order = 0;
+  for (const r of rows) {
+    const workers = Number(r.workers || 0);
+    if (!Number.isInteger(workers) || workers < 0) throw new Error("Manpower workers must be a whole number (>= 0).");
+    const hours = r.hours === "" || r.hours === undefined || r.hours === null ? null : Number(r.hours);
+    if (hours !== null && (Number.isNaN(hours) || hours < 0)) throw new Error("Manpower hours must be a positive number.");
+    await client.query(
+      `INSERT INTO daily_log_manpower (daily_log_id, company, trade, workers, hours, notes, sort_order)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [logId, r.company || null, r.trade || null, workers, hours, r.notes || null, order++]
+    );
+  }
+}
+
+async function manpowerFor(logIds) {
+  if (!logIds.length) return {};
+  const r = await pool.query(
+    "SELECT * FROM daily_log_manpower WHERE daily_log_id = ANY($1::uuid[]) ORDER BY sort_order ASC",
+    [logIds]
+  );
+  const byLog = {};
+  for (const row of r.rows) {
+    (byLog[row.daily_log_id] = byLog[row.daily_log_id] || []).push({
+      id: row.id,
+      company: row.company,
+      trade: row.trade,
+      workers: row.workers,
+      hours: row.hours === null ? null : Number(row.hours),
+      notes: row.notes,
+    });
+  }
+  return byLog;
 }
 
 // Load a log row (raw) by id.
@@ -107,31 +210,43 @@ router.get("/projects/:projectId/daily-logs", requireAuth, requireModule("dailyl
       [req.params.projectId]
     );
 
-    // Fetch photos for all logs in one query, then group.
+    const logIds = logsRes.rows.map((r) => r.id);
+
+    // Attachments (any file type) for all logs in one query, then group.
     const photosRes = await pool.query(
-      `SELECT p.id, p.daily_log_id, p.document_id, d.file_name, d.storage_key
+      `SELECT p.id, p.daily_log_id, p.document_id, d.file_name, d.storage_key, d.content_type
          FROM daily_log_photos p
          JOIN documents d ON d.id = p.document_id
         WHERE p.daily_log_id = ANY($1::uuid[])`,
-      [logsRes.rows.map((r) => r.id)]
+      [logIds]
     );
 
     const photosByLog = {};
     for (const p of photosRes.rows) {
+      const isImage = (p.content_type || "").startsWith("image/");
       let viewUrl = null;
       if (r2.isConfigured) {
-        try { viewUrl = await r2.getDownloadUrl(p.storage_key, p.file_name); } catch { viewUrl = null; }
+        try {
+          // Images render inline as thumbnails; other files get a download link.
+          viewUrl = isImage
+            ? await r2.getViewUrl(p.storage_key, p.content_type)
+            : await r2.getDownloadUrl(p.storage_key, p.file_name);
+        } catch { viewUrl = null; }
       }
       (photosByLog[p.daily_log_id] = photosByLog[p.daily_log_id] || []).push({
         id: p.id,
         documentId: p.document_id,
         fileName: p.file_name,
+        contentType: p.content_type || null,
+        isImage,
         viewUrl,
       });
     }
 
+    const manpowerByLog = await manpowerFor(logIds);
+
     const logs = logsRes.rows.map((row) => {
-      const log = mapLog(row, photosByLog[row.id] || []);
+      const log = mapLog(row, photosByLog[row.id] || [], manpowerByLog[row.id] || []);
       log.canEdit = canEditLog(req.user, row);
       return log;
     });
@@ -152,58 +267,54 @@ router.get("/projects/:projectId/daily-logs", requireAuth, requireModule("dailyl
 // admin/staff or trade_partner (project member). Not clients.
 // ============================================================
 router.post("/projects/:projectId/daily-logs", requireAuth, async (req, res) => {
+  const client = await pool.connect();
   try {
     if (req.user.role === "client") {
+      client.release();
       return res.status(403).json({ error: "Clients can view daily logs but not create them." });
     }
     const allowed = await userCanAccessProject(req.user, req.params.projectId);
     if (!allowed) {
+      client.release();
       return res.status(403).json({ error: "You do not have access to this project." });
     }
-
-    const { logDate, weather, temperature, workPerformed, crewCount, equipment, delays, notes } =
-      req.body || {};
-    if (!logDate) {
+    if (!req.body || !req.body.logDate) {
+      client.release();
       return res.status(400).json({ error: "A log date is required." });
     }
-    let crew = null;
-    if (crewCount !== undefined && crewCount !== null && crewCount !== "") {
-      const n = Number(crewCount);
-      if (!Number.isInteger(n) || n < 0) {
-        return res.status(400).json({ error: "Crew count must be a whole number (>= 0)." });
-      }
-      crew = n;
-    }
 
-    const ins = await pool.query(
-      `INSERT INTO daily_logs
-         (project_id, log_date, weather, temperature, work_performed, crew_count, equipment, delays, notes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING *`,
-      [
-        req.params.projectId,
-        logDate,
-        weather || null,
-        temperature || null,
-        workPerformed || null,
-        crew,
-        equipment || null,
-        delays || null,
-        notes || null,
-        req.user.id,
-      ]
+    const cols = ["project_id"], vals = [req.params.projectId], ph = ["$1"];
+    let i = 2;
+    for (const [bodyKey, col] of Object.entries(LOG_FIELDS)) {
+      if (req.body[bodyKey] !== undefined) {
+        cols.push(col); vals.push(coerce(bodyKey, req.body[bodyKey])); ph.push(`$${i++}`);
+      }
+    }
+    cols.push("created_by"); vals.push(req.user.id); ph.push(`$${i++}`);
+
+    await client.query("BEGIN");
+    const ins = await client.query(
+      `INSERT INTO daily_logs (${cols.join(", ")}) VALUES (${ph.join(", ")}) RETURNING id`,
+      vals
     );
+    const logId = ins.rows[0].id;
+    if (req.body.manpower !== undefined) await replaceManpower(client, logId, req.body.manpower);
+    await client.query("COMMIT");
+
     const withName = await pool.query(
       `SELECT dl.*, u.full_name AS created_by_name FROM daily_logs dl
        LEFT JOIN users u ON u.id = dl.created_by WHERE dl.id = $1`,
-      [ins.rows[0].id]
+      [logId]
     );
-    const log = mapLog(withName.rows[0], []);
-    log.canEdit = true;
-    res.status(201).json({ log });
+    const mp = await manpowerFor([logId]);
+    res.status(201).json({ log: mapLog(withName.rows[0], [], mp[logId] || []) });
   } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    if (err && /must be/.test(err.message)) return res.status(400).json({ error: err.message });
     console.error("[radah-pm] create daily log error:", err);
     res.status(500).json({ error: "Something went wrong." });
+  } finally {
+    client.release();
   }
 });
 
@@ -212,63 +323,49 @@ router.post("/projects/:projectId/daily-logs", requireAuth, async (req, res) => 
 // Internal, or the trade partner who authored it.
 // ============================================================
 router.patch("/daily-logs/:id", requireAuth, guardResource("daily_logs"), async (req, res) => {
+  const client = await pool.connect();
   try {
     const logRow = await getLogRow(req.params.id);
-    if (!logRow) return res.status(404).json({ error: "Daily log not found." });
+    if (!logRow) { client.release(); return res.status(404).json({ error: "Daily log not found." }); }
     if (!canEditLog(req.user, logRow)) {
+      client.release();
       return res.status(403).json({ error: "You can only edit your own daily logs." });
     }
 
-    const bodyKeyMap = {
-      logDate: "log_date",
-      weather: "weather",
-      temperature: "temperature",
-      workPerformed: "work_performed",
-      crewCount: "crew_count",
-      equipment: "equipment",
-      delays: "delays",
-      notes: "notes",
-    };
-    const updates = [];
-    const values = [];
+    const updates = [], values = [];
     let i = 1;
-    for (const [bodyKey, col] of Object.entries(bodyKeyMap)) {
+    for (const [bodyKey, col] of Object.entries(LOG_FIELDS)) {
       if (req.body[bodyKey] !== undefined) {
-        if (bodyKey === "crewCount") {
-          let crew = null;
-          if (req.body.crewCount !== null && req.body.crewCount !== "") {
-            const n = Number(req.body.crewCount);
-            if (!Number.isInteger(n) || n < 0) {
-              return res.status(400).json({ error: "Crew count must be a whole number (>= 0)." });
-            }
-            crew = n;
-          }
-          updates.push(`${col} = $${i}`); values.push(crew); i++;
-        } else if (bodyKey === "logDate") {
-          if (!req.body.logDate) return res.status(400).json({ error: "Log date cannot be empty." });
-          updates.push(`${col} = $${i}`); values.push(req.body.logDate); i++;
-        } else {
-          updates.push(`${col} = $${i}`); values.push(req.body[bodyKey] || null); i++;
+        if (bodyKey === "logDate" && !req.body.logDate) {
+          client.release();
+          return res.status(400).json({ error: "Log date cannot be empty." });
         }
+        updates.push(`${col} = $${i}`); values.push(coerce(bodyKey, req.body[bodyKey])); i++;
       }
     }
-    if (updates.length === 0) {
-      return res.status(400).json({ error: "No valid fields provided to update." });
+
+    await client.query("BEGIN");
+    if (updates.length > 0) {
+      values.push(req.params.id);
+      await client.query(`UPDATE daily_logs SET ${updates.join(", ")} WHERE id = $${i}`, values);
     }
-    values.push(req.params.id);
-    await pool.query(`UPDATE daily_logs SET ${updates.join(", ")} WHERE id = $${i}`, values);
+    if (req.body.manpower !== undefined) await replaceManpower(client, req.params.id, req.body.manpower);
+    await client.query("COMMIT");
 
     const withName = await pool.query(
       `SELECT dl.*, u.full_name AS created_by_name FROM daily_logs dl
        LEFT JOIN users u ON u.id = dl.created_by WHERE dl.id = $1`,
       [req.params.id]
     );
-    const log = mapLog(withName.rows[0], []);
-    log.canEdit = true;
-    res.json({ log });
+    const mp = await manpowerFor([req.params.id]);
+    res.json({ log: mapLog(withName.rows[0], [], mp[req.params.id] || []) });
   } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    if (err && /must be/.test(err.message)) return res.status(400).json({ error: err.message });
     console.error("[radah-pm] update daily log error:", err);
     res.status(500).json({ error: "Something went wrong." });
+  } finally {
+    client.release();
   }
 });
 
@@ -375,9 +472,12 @@ router.post(
       await client.query("COMMIT");
 
       let viewUrl = null;
-      try { viewUrl = await r2.getDownloadUrl(storageKey, fileName); } catch { viewUrl = null; }
+      const isImage = (contentType || "").startsWith("image/");
+      try {
+        viewUrl = isImage ? await r2.getViewUrl(storageKey, contentType) : await r2.getDownloadUrl(storageKey, fileName);
+      } catch { viewUrl = null; }
       res.status(201).json({
-        photo: { id: linkRes.rows[0].id, documentId, fileName, viewUrl },
+        photo: { id: linkRes.rows[0].id, documentId, fileName, contentType: contentType || null, isImage, viewUrl },
       });
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});
@@ -469,6 +569,15 @@ router.post(
         }
       }
 
+      // Manpower summary line for the email.
+      const mpRes = await pool.query(
+        "SELECT company, trade, workers, hours FROM daily_log_manpower WHERE daily_log_id = $1 ORDER BY sort_order ASC",
+        [req.params.logId]
+      );
+      const manpowerSummary = mpRes.rows
+        .map((m) => `${[m.company, m.trade].filter(Boolean).join(" / ")}: ${m.workers} worker(s)${m.hours != null ? `, ${Number(m.hours)} hrs` : ""}`)
+        .join("\n");
+
       const esc = mail.escapeHtml;
       const dateStr = new Date(log.log_date).toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
       const row = (label, val) =>
@@ -488,10 +597,20 @@ router.post(
           <p style="margin:0 0 16px;color:#6b7280;">${esc(dateStr)}${log.created_by_name ? " · logged by " + esc(log.created_by_name) : ""}</p>
           ${noteHtml}
           <table style="border-collapse:collapse;font-size:14px;">
-            ${row("Weather", [log.weather, log.temperature].filter(Boolean).join(", "))}
-            ${row("Crew / Manpower", log.crew_count != null ? String(log.crew_count) : "")}
+            ${row("Time On / Off Site", [log.time_on_site, log.time_off_site].filter(Boolean).join(" – "))}
+            ${row("Weather", [log.weather, log.temperature, [log.temp_high, log.temp_low].filter((x) => x != null).join("/"), log.precipitation, log.wind].filter(Boolean).join(", "))}
+            ${log.weather_delay ? `<tr><td style="padding:6px 12px 6px 0;color:#6b7280;">Weather Delay</td><td style="padding:6px 0;color:#B23B3B;"><strong>Yes</strong></td></tr>` : ""}
+            ${row("Manpower", manpowerSummary)}
+            ${row("Crew Count", log.crew_count != null ? String(log.crew_count) : "")}
             ${row("Work Performed", log.work_performed)}
+            ${row("Planned Work (Look-Ahead)", log.planned_work)}
             ${row("Equipment On Site", log.equipment)}
+            ${row("Deliveries Received", log.deliveries)}
+            ${row("Visitors On Site", log.visitors)}
+            ${row("Inspections", log.inspections)}
+            ${row("Safety Incidents", log.safety_incidents)}
+            ${row("Safety Observations", log.safety_observations)}
+            ${row("Toolbox Talk / JHA", log.toolbox_talk)}
             ${row("Delays / Issues", log.delays)}
             ${row("Notes", log.notes)}
           </table>
