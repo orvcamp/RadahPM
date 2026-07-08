@@ -12,7 +12,7 @@ import ChangeOrdersTab from "../components/ChangeOrdersTab.jsx";
 import DailyLogsTab from "../components/DailyLogsTab.jsx";
 import RfisTab from "../components/RfisTab.jsx";
 import SubmittalsTab from "../components/SubmittalsTab.jsx";
-import { STAGES, stageIndex } from "../config.js";
+import { STAGES, stageIndex, TAB_GROUPS, TAB_LABELS, isStageRelevant } from "../config.js";
 
 // Horizontal lifecycle stage tracker. Admin/staff can advance/step back.
 function StageStepper({ project, canEdit, onChange }) {
@@ -239,30 +239,55 @@ export default function ProjectDetailPage() {
 
       <StageStepper project={project} canEdit={isInternal} onChange={(p) => setProject(p)} />
 
-      <div className="tab-row">
-        <button className={`tab-btn ${tab === "timeline" ? "active" : ""}`} onClick={() => setTab("timeline")}>Timeline</button>
-        <button className={`tab-btn ${tab === "tasks" ? "active" : ""}`} onClick={() => setTab("tasks")}>Tasks</button>
-        <button className={`tab-btn ${tab === "phases" ? "active" : ""}`} onClick={() => setTab("phases")}>Schedule</button>
-        <button className={`tab-btn ${tab === "team" ? "active" : ""}`} onClick={() => setTab("team")}>Team</button>
-        {modOn("documents") && (
-          <button className={`tab-btn ${tab === "documents" ? "active" : ""}`} onClick={() => setTab("documents")}>Documents</button>
-        )}
-        {user.role !== "trade_partner" && modOn("budget") && (
-          <button className={`tab-btn ${tab === "budget" ? "active" : ""}`} onClick={() => setTab("budget")}>Budget</button>
-        )}
-        {user.role !== "trade_partner" && modOn("changeorders") && (
-          <button className={`tab-btn ${tab === "changeorders" ? "active" : ""}`} onClick={() => setTab("changeorders")}>Change Orders</button>
-        )}
-        {modOn("dailylogs") && (
-          <button className={`tab-btn ${tab === "dailylogs" ? "active" : ""}`} onClick={() => setTab("dailylogs")}>Daily Logs</button>
-        )}
-        {modOn("rfis") && (
-          <button className={`tab-btn ${tab === "rfis" ? "active" : ""}`} onClick={() => setTab("rfis")}>RFIs</button>
-        )}
-        {modOn("submittals") && (
-          <button className={`tab-btn ${tab === "submittals" ? "active" : ""}`} onClick={() => setTab("submittals")}>Submittals</button>
-        )}
-      </div>
+      {(() => {
+        // A tab is visible if its module is on and the role allows it.
+        const tabVisible = (key) => {
+          if (key === "documents") return modOn("documents");
+          if (key === "budget") return user.role !== "trade_partner" && modOn("budget");
+          if (key === "changeorders") return user.role !== "trade_partner" && modOn("changeorders");
+          if (key === "dailylogs") return modOn("dailylogs");
+          if (key === "rfis") return modOn("rfis");
+          if (key === "submittals") return modOn("submittals");
+          return true; // timeline, tasks, phases, team
+        };
+        return (
+          <div style={{ marginBottom: "1.4rem" }}>
+            {TAB_GROUPS.map((group) => {
+              const visible = group.tabs.filter(tabVisible);
+              if (visible.length === 0) return null;
+              return (
+                <div key={group.key} style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.35rem", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--steel, #6b7280)", minWidth: 74 }}>
+                    {group.label}
+                  </span>
+                  <div className="tab-row" style={{ marginBottom: 0, borderBottom: "none", flex: 1 }}>
+                    {visible.map((key) => {
+                      const relevant = isStageRelevant(project.stage, key);
+                      return (
+                        <button
+                          key={key}
+                          className={`tab-btn ${tab === key ? "active" : ""}`}
+                          onClick={() => setTab(key)}
+                          title={relevant ? `Relevant at the current stage` : undefined}
+                        >
+                          {TAB_LABELS[key]}
+                          {relevant && (
+                            <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "var(--gold, #C9A227)", marginLeft: 6, verticalAlign: "middle" }} />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+            <p className="text-sm text-steel" style={{ marginTop: "0.4rem", fontSize: "0.74rem" }}>
+              <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "var(--gold, #C9A227)", marginRight: 5, verticalAlign: "middle" }} />
+              Most relevant at the current stage. Everything stays accessible.
+            </p>
+          </div>
+        );
+      })()}
 
       {tab === "timeline" && (
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
