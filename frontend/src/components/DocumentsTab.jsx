@@ -67,6 +67,74 @@ function MoveModal({ doc, folders, onClose, onMoved }) {
   );
 }
 
+// ---------- in-app document viewer ----------
+function canPreview(contentType, fileName) {
+  const ct = (contentType || "").toLowerCase();
+  const name = (fileName || "").toLowerCase();
+  if (ct.startsWith("image/")) return "image";
+  if (ct === "application/pdf" || name.endsWith(".pdf")) return "pdf";
+  if (ct.startsWith("text/") || ct === "application/json") return "text";
+  if (/\.(png|jpe?g|gif|webp|svg|bmp)$/.test(name)) return "image";
+  if (/\.(txt|csv|md|log|json)$/.test(name)) return "text";
+  return null;
+}
+
+function ViewerModal({ doc, onClose, onDownload }) {
+  const [state, setState] = useState({ loading: true, url: null, contentType: null, error: "" });
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const d = await api.get(`/documents/${doc.id}/view-url`);
+        if (active) setState({ loading: false, url: d.viewUrl, contentType: d.contentType, error: "" });
+      } catch (err) {
+        if (active) setState({ loading: false, url: null, contentType: null, error: err.message });
+      }
+    })();
+    return () => { active = false; };
+  }, [doc.id]);
+
+  const kind = canPreview(state.contentType || doc.contentType, doc.fileName);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 900, width: "92vw" }}>
+        <div className="modal-header">
+          <h3 style={{ fontSize: "1rem", textTransform: "uppercase", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.fileName}</h3>
+          <button className="modal-close" onClick={onClose}>&times;</button>
+        </div>
+
+        {state.loading && <div className="loading-spinner" />}
+        {state.error && <div className="error-msg">{state.error}</div>}
+
+        {!state.loading && !state.error && (
+          <div style={{ marginBottom: "1rem" }}>
+            {kind === "image" && (
+              <img src={state.url} alt={doc.fileName} style={{ maxWidth: "100%", maxHeight: "70vh", display: "block", margin: "0 auto", borderRadius: 6 }} />
+            )}
+            {(kind === "pdf" || kind === "text") && (
+              <iframe title={doc.fileName} src={state.url} style={{ width: "100%", height: "70vh", border: "1px solid var(--line)", borderRadius: 6, background: "#fff" }} />
+            )}
+            {!kind && (
+              <div className="empty-state" style={{ padding: "2rem 1rem" }}>
+                <h3>Preview not available</h3>
+                <p className="text-sm">This file type can't be previewed in the browser. You can download it instead.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem" }}>
+          {state.url && <a className="btn btn-outline btn-sm" href={state.url} target="_blank" rel="noreferrer">Open in New Tab</a>}
+          <button className="btn btn-outline btn-sm" onClick={() => onDownload(doc)}>Download</button>
+          <button className="btn btn-gold btn-sm" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DocumentsTab({ projectId }) {
   const { user } = useAuth();
   const isInternal = user.role === "admin" || user.role === "staff";
@@ -82,6 +150,7 @@ export default function DocumentsTab({ projectId }) {
   const [newFolderName, setNewFolderName] = useState("");
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [moveDoc, setMoveDoc] = useState(null);
+  const [viewDoc, setViewDoc] = useState(null);
   const [applying, setApplying] = useState(false);
 
   async function applyTemplate() {
@@ -232,15 +301,28 @@ export default function DocumentsTab({ projectId }) {
         </div>
       </div>
 
-      {/* Breadcrumb */}
-      <div className="text-sm" style={{ marginBottom: "0.9rem", color: "var(--steel)" }}>
-        <span style={{ cursor: "pointer", fontWeight: currentFolderId === null ? 700 : 400 }} onClick={() => setCurrentFolderId(null)}>📁 Project root</span>
-        {breadcrumb.map((f) => (
-          <span key={f.id}>
-            {" / "}
-            <span style={{ cursor: "pointer", fontWeight: f.id === currentFolderId ? 700 : 400 }} onClick={() => setCurrentFolderId(f.id)}>{f.name}</span>
-          </span>
-        ))}
+      {/* Navigation: back up one level + breadcrumb */}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.7rem", marginBottom: "0.9rem", flexWrap: "wrap" }}>
+        <button
+          className="btn btn-outline btn-sm"
+          disabled={currentFolderId === null}
+          onClick={() => {
+            const cur = currentFolderId ? folderById(currentFolderId) : null;
+            setCurrentFolderId(cur && cur.parentFolderId ? cur.parentFolderId : null);
+          }}
+          title={currentFolderId === null ? "You're at the project root" : "Up one level"}
+        >
+          ← Back
+        </button>
+        <div className="text-sm" style={{ color: "var(--steel)" }}>
+          <span style={{ cursor: "pointer", fontWeight: currentFolderId === null ? 700 : 400 }} onClick={() => setCurrentFolderId(null)}>📁 Project root</span>
+          {breadcrumb.map((f) => (
+            <span key={f.id}>
+              {" / "}
+              <span style={{ cursor: "pointer", fontWeight: f.id === currentFolderId ? 700 : 400 }} onClick={() => setCurrentFolderId(f.id)}>{f.name}</span>
+            </span>
+          ))}
+        </div>
       </div>
 
       {isInternal && showNewFolder && (
@@ -288,12 +370,15 @@ export default function DocumentsTab({ projectId }) {
             ))}
             {folderDocs.map((doc) => (
               <tr key={doc.id}>
-                <td><strong>{doc.fileName}</strong></td>
+                <td>
+                  <strong className="clickable" style={{ cursor: "pointer" }} onClick={() => setViewDoc(doc)} title="Preview">{doc.fileName}</strong>
+                </td>
                 <td>{formatSize(doc.sizeBytes)}</td>
                 <td>{doc.uploadedByName || "—"}</td>
                 <td>{doc.createdAt ? new Date(doc.createdAt).toLocaleDateString() : "—"}</td>
                 <td>
                   <div style={{ display: "flex", gap: "0.4rem", justifyContent: "flex-end" }}>
+                    <button className="btn btn-gold btn-sm" onClick={() => setViewDoc(doc)}>View</button>
                     <button className="btn btn-outline btn-sm" onClick={() => handleDownload(doc)}>Download</button>
                     {canModifyDoc(doc) && <button className="btn btn-outline btn-sm" onClick={() => setMoveDoc(doc)}>Move</button>}
                     {canModifyDoc(doc) && <button className="btn btn-danger btn-sm" onClick={() => handleDelete(doc)}>Delete</button>}
@@ -311,6 +396,14 @@ export default function DocumentsTab({ projectId }) {
           folders={folders}
           onClose={() => setMoveDoc(null)}
           onMoved={() => { setMoveDoc(null); load(); }}
+        />
+      )}
+
+      {viewDoc && (
+        <ViewerModal
+          doc={viewDoc}
+          onClose={() => setViewDoc(null)}
+          onDownload={(d) => handleDownload(d)}
         />
       )}
     </div>

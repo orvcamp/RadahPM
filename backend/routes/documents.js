@@ -215,7 +215,27 @@ router.get("/documents/:id/download-url", requireAuth, requireR2, async (req, re
     }
     const downloadUrl = await r2.getDownloadUrl(doc.storage_key, doc.file_name);
     res.json({ downloadUrl });
+
+/**
+ * GET /api/documents/:id/view-url
+ * Returns a short-lived presigned URL that renders INLINE in the browser
+ * (for the in-app preview), plus the file's content type so the client can
+ * pick the right viewer.
+ */
+router.get("/documents/:id/view-url", requireAuth, requireR2, async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM documents WHERE id = $1", [req.params.id]);
+    const doc = result.rows[0];
+    if (!doc) return res.status(404).json({ error: "Document not found." });
+    const allowed = await userCanAccessProject(req.user, doc.project_id);
+    if (!allowed) return res.status(403).json({ error: "You do not have access to this document." });
+    const viewUrl = await r2.getViewUrl(doc.storage_key, doc.content_type);
+    res.json({ viewUrl, contentType: doc.content_type || null, fileName: doc.file_name });
   } catch (err) {
+    console.error("[radah-pm] view url error:", err);
+    res.status(500).json({ error: "Could not open the document." });
+  }
+});  } catch (err) {
     console.error("[radah-pm] download-url error:", err);
     res.status(500).json({ error: "Could not prepare the download. Please try again." });
   }
@@ -263,7 +283,6 @@ router.delete("/documents/:id", requireAuth, requireR2, async (req, res) => {
 // move their own uploads. Deleting a folder re-parents its contents up
 // one level (never deletes files).
 // ============================================================
-
 function mapFolder(row) {
   return {
     id: row.id,

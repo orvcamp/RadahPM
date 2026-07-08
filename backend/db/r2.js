@@ -70,6 +70,20 @@ async function getDownloadUrl(storageKey, fileName) {
 }
 
 /**
+ * Generate a presigned URL the browser can display INLINE (preview) rather
+ * than force-download. Used by the in-app document viewer.
+ */
+async function getViewUrl(storageKey, contentType) {
+  const command = new GetObjectCommand({
+    Bucket: BUCKET,
+    Key: storageKey,
+    ResponseContentDisposition: "inline",
+    ResponseContentType: contentType || undefined,
+  });
+  return getSignedUrl(client, command, { expiresIn: 600 });
+}
+
+/**
  * Delete an object from the bucket.
  */
 async function deleteObject(storageKey) {
@@ -77,4 +91,4 @@ async function deleteObject(storageKey) {
   return client.send(command);
 }
 
-module.exports = { isConfigured, getUploadUrl, getDownloadUrl, deleteObject };
+module.exports = { isConfigured, getUploadUrl, getDownloadUrl, getViewUrl, deleteObject };
