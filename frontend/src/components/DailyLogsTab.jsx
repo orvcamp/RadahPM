@@ -361,7 +361,7 @@ export default function DailyLogsTab({ projectId }) {
               <div style={{ display: "flex", gap: "0.4rem" }}>
                 <button className="btn btn-outline btn-sm" onClick={() => setEmailLog(log)}>Email</button>
                 {log.canEdit && <button className="btn btn-outline btn-sm" onClick={() => setModal(log)}>Edit</button>}
-                {log.canEdit && <button className="btn btn-danger btn-sm" onClick={() => remove(log)}>Delete</button>}
+                {user.role === "admin" && <button className="btn btn-danger btn-sm" onClick={() => remove(log)}>Delete</button>}
               </div>
             </div>
 

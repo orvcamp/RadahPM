@@ -43,6 +43,7 @@ async function migrate() {
     await runSqlFile("migrations_phase3_project_photo.sql", "Migration (project photo)");
     await runSqlFile("migrations_phase3_project_stage.sql", "Migration (project stage)");
     await runSqlFile("migrations_phase3_schedule_files.sql", "Migration (schedule files)");
+    await runSqlFile("migrations_phase3_soft_delete.sql", "Migration (soft delete / recycle bin)");
   } finally {
     await pool.end();
   }

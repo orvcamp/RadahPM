@@ -342,7 +342,7 @@ export default function ChangeOrdersTab({ projectId }) {
                         {canManage && co.status !== "rejected" && (
                           <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => setModal(co)}>Edit</button>
                         )}
-                        {canManage && (
+                        {user.role === "admin" && (
                           <button className="btn btn-danger btn-sm" disabled={busy} onClick={() => remove(co)}>Delete</button>
                         )}
                       </div>

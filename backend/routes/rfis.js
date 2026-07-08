@@ -104,7 +104,7 @@ router.get("/projects/:projectId/rfis", requireAuth, requireModule("rfis"), guar
          LEFT JOIN users au ON au.id = r.assigned_to
          LEFT JOIN users anu ON anu.id = r.answered_by
          LEFT JOIN users cu ON cu.id = r.created_by
-        WHERE r.project_id = $1
+        WHERE r.project_id = $1 AND r.deleted_at IS NULL
         ORDER BY r.rfi_number DESC`,
       [req.params.projectId]
     );
@@ -252,11 +252,14 @@ router.post("/rfis/:id/transition", requireAuth, requireModule("rfis"), guardRes
 // ============================================================
 // DELETE (admin/staff)
 // ============================================================
-router.delete("/rfis/:id", requireAuth, requireModule("rfis"), requireRole("admin", "staff"), guardResource("rfis"), async (req, res) => {
+router.delete("/rfis/:id", requireAuth, requireModule("rfis"), requireRole("admin"), guardResource("rfis"), async (req, res) => {
   try {
-    const r = await pool.query("DELETE FROM rfis WHERE id = $1 RETURNING id", [req.params.id]);
+    const r = await pool.query(
+      "UPDATE rfis SET deleted_at = now(), deleted_by = $1 WHERE id = $2 AND deleted_at IS NULL RETURNING id",
+      [req.user.id, req.params.id]
+    );
     if (r.rows.length === 0) return res.status(404).json({ error: "RFI not found." });
-    res.json({ message: "RFI deleted." });
+    res.json({ message: "RFI moved to Deleted Items. An admin can restore it." });
   } catch (err) {
     console.error("[radah-pm] delete rfi error:", err);
     res.status(500).json({ error: "Something went wrong." });

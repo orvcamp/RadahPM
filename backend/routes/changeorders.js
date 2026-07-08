@@ -144,7 +144,7 @@ router.get("/projects/:projectId/change-orders", requireAuth, requireModule("cha
            LEFT JOIN budget_categories c ON c.id = co.category_id
            LEFT JOIN users su ON su.id = co.submitted_by
            LEFT JOIN users du ON du.id = co.decided_by
-          WHERE co.project_id = $1
+          WHERE co.project_id = $1 AND co.deleted_at IS NULL
           ORDER BY co.co_number DESC`,
         [req.params.projectId]
       ),
@@ -468,15 +468,16 @@ router.post("/change-orders/:id/transition", requireAuth, guardResource("change_
 router.delete(
   "/change-orders/:id",
   requireAuth,
-  requireRole("admin", "staff"),
+  requireRole("admin"),
   guardResource("change_orders"),
   async (req, res) => {
     try {
-      const r = await pool.query("DELETE FROM change_orders WHERE id = $1 RETURNING id", [
-        req.params.id,
-      ]);
+      const r = await pool.query(
+        "UPDATE change_orders SET deleted_at = now(), deleted_by = $1 WHERE id = $2 AND deleted_at IS NULL RETURNING id",
+        [req.user.id, req.params.id]
+      );
       if (r.rows.length === 0) return res.status(404).json({ error: "Change order not found." });
-      res.json({ message: "Change order deleted." });
+      res.json({ message: "Change order moved to Deleted Items. An admin can restore it." });
     } catch (err) {
       console.error("[radah-pm] delete change order error:", err);
       res.status(500).json({ error: "Something went wrong." });

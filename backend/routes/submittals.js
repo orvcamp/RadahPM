@@ -103,7 +103,7 @@ router.get("/projects/:projectId/submittals", requireAuth, requireModule("submit
   try {
     const subsRes = await pool.query(
       `SELECT ${SELECT_NAMES} FROM submittals s ${JOIN_NAMES}
-        WHERE s.project_id = $1
+        WHERE s.project_id = $1 AND s.deleted_at IS NULL
         ORDER BY s.submittal_number DESC, s.revision DESC`,
       [req.params.projectId]
     );
@@ -270,11 +270,14 @@ router.post("/submittals/:id/revise", requireAuth, requireModule("submittals"), 
 });
 
 // ============================================================ DELETE (admin/staff)
-router.delete("/submittals/:id", requireAuth, requireModule("submittals"), requireRole("admin", "staff"), guardResource("submittals"), async (req, res) => {
+router.delete("/submittals/:id", requireAuth, requireModule("submittals"), requireRole("admin"), guardResource("submittals"), async (req, res) => {
   try {
-    const r = await pool.query("DELETE FROM submittals WHERE id = $1 RETURNING id", [req.params.id]);
+    const r = await pool.query(
+      "UPDATE submittals SET deleted_at = now(), deleted_by = $1 WHERE id = $2 AND deleted_at IS NULL RETURNING id",
+      [req.user.id, req.params.id]
+    );
     if (r.rows.length === 0) return res.status(404).json({ error: "Submittal not found." });
-    res.json({ message: "Submittal deleted." });
+    res.json({ message: "Submittal moved to Deleted Items. An admin can restore it." });
   } catch (err) {
     console.error("[radah-pm] delete submittal error:", err);
     res.status(500).json({ error: "Something went wrong." });

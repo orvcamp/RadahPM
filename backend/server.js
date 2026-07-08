@@ -18,6 +18,7 @@ const myModulesRoutes = require("./routes/mymodules");
 const rfiRoutes = require("./routes/rfis");
 const submittalRoutes = require("./routes/submittals");
 const scheduleRoutes = require("./routes/schedules");
+const trashRoutes = require("./routes/trash");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -55,6 +56,7 @@ app.use("/api", myModulesRoutes); // GET /api/my-modules
 app.use("/api", rfiRoutes); // RFIs
 app.use("/api", submittalRoutes); // Submittals
 app.use("/api", scheduleRoutes); // Project schedule files
+app.use("/api", trashRoutes); // Deleted Items (restore / purge)
 
 // 404 handler
 app.use((req, res) => {

@@ -102,7 +102,7 @@ router.get("/projects/:projectId/daily-logs", requireAuth, requireModule("dailyl
       `SELECT dl.*, u.full_name AS created_by_name
          FROM daily_logs dl
          LEFT JOIN users u ON u.id = dl.created_by
-        WHERE dl.project_id = $1
+        WHERE dl.project_id = $1 AND dl.deleted_at IS NULL
         ORDER BY dl.log_date DESC, dl.created_at DESC`,
       [req.params.projectId]
     );
@@ -278,15 +278,15 @@ router.patch("/daily-logs/:id", requireAuth, guardResource("daily_logs"), async 
 // document rows remain in the project library (only the link is removed
 // by the cascade on daily_log_photos).
 // ============================================================
-router.delete("/daily-logs/:id", requireAuth, guardResource("daily_logs"), async (req, res) => {
+router.delete("/daily-logs/:id", requireAuth, requireRole("admin"), guardResource("daily_logs"), async (req, res) => {
   try {
     const logRow = await getLogRow(req.params.id);
     if (!logRow) return res.status(404).json({ error: "Daily log not found." });
-    if (!canEditLog(req.user, logRow)) {
-      return res.status(403).json({ error: "You can only delete your own daily logs." });
-    }
-    await pool.query("DELETE FROM daily_logs WHERE id = $1", [req.params.id]);
-    res.json({ message: "Daily log deleted." });
+    await pool.query(
+      "UPDATE daily_logs SET deleted_at = now(), deleted_by = $1 WHERE id = $2 AND deleted_at IS NULL",
+      [req.user.id, req.params.id]
+    );
+    res.json({ message: "Daily log moved to Deleted Items. An admin can restore it." });
   } catch (err) {
     console.error("[radah-pm] delete daily log error:", err);
     res.status(500).json({ error: "Something went wrong." });

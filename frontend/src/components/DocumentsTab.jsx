@@ -203,14 +203,15 @@ export default function DocumentsTab({ projectId }) {
   }
 
   async function handleDelete(doc) {
-    if (!confirm(`Delete "${doc.fileName}"? This permanently removes the file.`)) return;
+    if (!confirm(`Delete "${doc.fileName}"?\n\nIt moves to Deleted Items and can be restored by an admin.`)) return;
     try {
       await api.delete(`/documents/${doc.id}`);
       setDocuments((prev) => prev.filter((d) => d.id !== doc.id));
     } catch (err) { alert(err.message); }
   }
 
-  const canModifyDoc = (doc) => isInternal || doc.uploadedBy === user.id;
+  const canModifyDoc = (doc) => isInternal || doc.uploadedBy === user.id; // move
+  const canDeleteDoc = () => user.role === "admin"; // delete is admin-only (recoverable)
 
   if (loading) return <div className="loading-spinner" />;
 
@@ -314,7 +315,7 @@ export default function DocumentsTab({ projectId }) {
                     <button className="btn btn-gold btn-sm" onClick={() => setViewDoc(doc)}>View</button>
                     <button className="btn btn-outline btn-sm" onClick={() => handleDownload(doc)}>Download</button>
                     {canModifyDoc(doc) && <button className="btn btn-outline btn-sm" onClick={() => setMoveDoc(doc)}>Move</button>}
-                    {canModifyDoc(doc) && <button className="btn btn-danger btn-sm" onClick={() => handleDelete(doc)}>Delete</button>}
+                    {canDeleteDoc() && <button className="btn btn-danger btn-sm" onClick={() => handleDelete(doc)}>Delete</button>}
                   </div>
                 </td>
               </tr>

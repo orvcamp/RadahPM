@@ -323,7 +323,7 @@ export default function RfisTab({ projectId }) {
                         {canAnswer && rfi.status !== "closed" && <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => transition(rfi, "close", `Close RFI #${rfi.rfiNumber}?`)}>Close</button>}
                         {canAnswer && rfi.status !== "open" && <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => transition(rfi, "reopen")}>Reopen</button>}
                         {(user.role === "admin" || user.role === "staff" || canRaise) && rfi.status !== "closed" && <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => setModal(rfi)}>Edit</button>}
-                        {(user.role === "admin" || user.role === "staff") && <button className="btn btn-danger btn-sm" disabled={busy} onClick={() => remove(rfi)}>Delete</button>}
+                        {user.role === "admin" && <button className="btn btn-danger btn-sm" disabled={busy} onClick={() => remove(rfi)}>Delete</button>}
                       </div>
                     </td>
                   </tr>

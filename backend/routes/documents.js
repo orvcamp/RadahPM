@@ -93,7 +93,7 @@ router.get("/projects/:projectId/documents", requireAuth, requireModule("documen
       `SELECT d.*, u.full_name AS uploaded_by_name
        FROM documents d
        LEFT JOIN users u ON u.id = d.uploaded_by
-       WHERE d.project_id = $1
+       WHERE d.project_id = $1 AND d.deleted_at IS NULL
        ORDER BY d.created_at DESC`,
       [req.params.projectId]
     );
@@ -247,9 +247,9 @@ router.get("/documents/:id/view-url", requireAuth, requireR2, async (req, res) =
  * Admin/staff, or the user who uploaded it, may delete. Removes both the
  * R2 object and the metadata row.
  */
-router.delete("/documents/:id", requireAuth, requireR2, async (req, res) => {
+router.delete("/documents/:id", requireAuth, requireRole("admin"), async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM documents WHERE id = $1", [req.params.id]);
+    const result = await pool.query("SELECT * FROM documents WHERE id = $1 AND deleted_at IS NULL", [req.params.id]);
     const doc = result.rows[0];
     if (!doc) {
       return res.status(404).json({ error: "Document not found." });
@@ -258,21 +258,13 @@ router.delete("/documents/:id", requireAuth, requireR2, async (req, res) => {
     if (!allowed) {
       return res.status(403).json({ error: "You do not have access to this document." });
     }
-    const canDelete = isInternal(req.user) || doc.uploaded_by === req.user.id;
-    if (!canDelete) {
-      return res.status(403).json({ error: "Only the uploader or RADAH staff can delete this document." });
-    }
-
-    // Delete from R2 first; if that fails, keep the row so we don't orphan a file.
-    try {
-      await r2.deleteObject(doc.storage_key);
-    } catch (e) {
-      console.error("[radah-pm] R2 delete failed:", e);
-      return res.status(502).json({ error: "Could not delete the stored file. Please try again." });
-    }
-
-    await pool.query("DELETE FROM documents WHERE id = $1", [req.params.id]);
-    res.json({ message: "Document deleted." });
+    // Soft delete: the stored file is retained and an admin can restore it
+    // from the project's Deleted Items view.
+    await pool.query(
+      "UPDATE documents SET deleted_at = now(), deleted_by = $1 WHERE id = $2",
+      [req.user.id, req.params.id]
+    );
+    res.json({ message: "Document moved to Deleted Items. An admin can restore it." });
   } catch (err) {
     console.error("[radah-pm] delete document error:", err);
     res.status(500).json({ error: "Something went wrong." });

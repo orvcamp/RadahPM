@@ -314,7 +314,7 @@ export default function SubmittalsTab({ projectId }) {
                         {canReview && s.status === "returned" && <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => transition(s, "reopen")}>Reopen</button>}
                         {canSubmit && s.status === "returned" && <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => revise(s)}>Revise</button>}
                         {canSubmit && s.status !== "returned" && <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => setModal(s)}>Edit</button>}
-                        {isStaff && <button className="btn btn-danger btn-sm" disabled={busy} onClick={() => remove(s)}>Delete</button>}
+                        {user.role === "admin" && <button className="btn btn-danger btn-sm" disabled={busy} onClick={() => remove(s)}>Delete</button>}
                       </div>
                     </td>
                   </tr>
