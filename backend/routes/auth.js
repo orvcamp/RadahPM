@@ -6,7 +6,8 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const pool = require("../db/pool");
 const mail = require("../mail");
-const { requireAuth, requireRole, JWT_SECRET } = require("../middleware/auth");
+const { requireAuth, requireRole, revokeUserSessions, invalidateUserCache, JWT_SECRET } = require("../middleware/auth");
+const { loginLimiter, forgotPasswordLimiter, resetPasswordLimiter, resetKey } = require("../middleware/rateLimit");
 
 const APP_URL = (process.env.APP_URL || "https://app.mangodoe.com").replace(/\/+$/, "");
 const APP_NAME = process.env.APP_NAME || "MangoDoe";
@@ -25,6 +26,7 @@ function signToken(user) {
       fullName: user.full_name,
       orgId: user.org_id,
       isPlatformAdmin: user.is_platform_admin === true,
+      tv: user.token_version == null ? 0 : user.token_version,
     },
     JWT_SECRET,
     { expiresIn: TOKEN_EXPIRY }
@@ -48,7 +50,7 @@ function publicUser(user) {
  * POST /api/auth/login
  * Body: { email, password }
  */
-router.post("/login", async (req, res) => {
+router.post("/login", loginLimiter, async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) {
     return res.status(400).json({ error: "Email and password are required." });
@@ -70,6 +72,8 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid email or password." });
     }
 
+    // Successful sign-in clears this IP+email's failed-attempt counter.
+    resetKey(req);
     const token = signToken(user);
     res.json({ token, user: publicUser(user) });
   } catch (err) {
@@ -137,8 +141,13 @@ router.post("/change-password", requireAuth, async (req, res) => {
       newHash,
       req.user.id,
     ]);
+    // Invalidate every existing token for this user, then hand this session a
+    // fresh one so the person changing their password isn't logged out.
+    await revokeUserSessions(req.user.id);
+    const fresh = await pool.query("SELECT * FROM users WHERE id = $1", [req.user.id]);
+    const token = signToken(fresh.rows[0]);
 
-    res.json({ message: "Password updated successfully." });
+    res.json({ message: "Password updated. You've been signed out on other devices.", token });
   } catch (err) {
     console.error("[radah-pm] change-password error:", err);
     res.status(500).json({ error: "Something went wrong." });
@@ -150,7 +159,7 @@ router.post("/change-password", requireAuth, async (req, res) => {
  * Always responds the same way (no account enumeration). If the email maps to
  * an active user, a single-use, 1-hour reset link is emailed.
  */
-router.post("/forgot-password", async (req, res) => {
+router.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
   const generic = { message: "If an account exists for that email, a password reset link has been sent." };
   try {
     const email = (req.body && req.body.email ? String(req.body.email) : "").toLowerCase().trim();
@@ -207,7 +216,7 @@ router.post("/forgot-password", async (req, res) => {
  * POST /api/auth/reset-password  { token, newPassword }
  * Verifies a single-use, unexpired token and sets the new password.
  */
-router.post("/reset-password", async (req, res) => {
+router.post("/reset-password", resetPasswordLimiter, async (req, res) => {
   const { token, newPassword } = req.body || {};
   if (!token || !newPassword) {
     return res.status(400).json({ error: "Token and new password are required." });
@@ -227,6 +236,8 @@ router.post("/reset-password", async (req, res) => {
     }
     const newHash = await bcrypt.hash(String(newPassword), 12);
     await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [newHash, row.user_id]);
+    // Any sessions opened before the reset are no longer valid.
+    await revokeUserSessions(row.user_id);
     // Consume this token and clear any others for the user.
     await pool.query("UPDATE password_reset_tokens SET used_at = now() WHERE id = $1", [row.id]);
     await pool.query("DELETE FROM password_reset_tokens WHERE user_id = $1 AND used_at IS NULL", [row.user_id]);

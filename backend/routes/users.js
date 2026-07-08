@@ -6,7 +6,7 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const pool = require("../db/pool");
-const { requireAuth, requireRole, requireOrg } = require("../middleware/auth");
+const { requireAuth, requireRole, requireOrg, revokeUserSessions } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -95,6 +95,8 @@ router.patch("/:id/deactivate", requireAuth, requireOrg, requireRole("admin", "s
       "UPDATE users SET is_active = FALSE WHERE id = $1 AND org_id = $2 RETURNING *",
       [req.params.id, req.user.orgId]
     );
+    // A deactivated user's existing tokens must stop working immediately.
+    if (result.rows.length > 0) await revokeUserSessions(req.params.id);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "User not found." });
     }
@@ -146,6 +148,8 @@ router.post("/:id/reset-password", requireAuth, requireOrg, requireRole("admin",
       passwordHash,
       req.params.id,
     ]);
+    // Kill any sessions the user still has open.
+    await revokeUserSessions(req.params.id);
 
     res.json({
       temporaryPassword: tempPassword,

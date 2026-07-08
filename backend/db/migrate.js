@@ -45,6 +45,7 @@ async function migrate() {
     await runSqlFile("migrations_phase3_schedule_files.sql", "Migration (schedule files)");
     await runSqlFile("migrations_phase3_soft_delete.sql", "Migration (soft delete / recycle bin)");
     await runSqlFile("migrations_phase3_dailylog_expanded.sql", "Migration (expanded daily log)");
+    await runSqlFile("migrations_phase3_token_version.sql", "Migration (session revocation)");
   } finally {
     await pool.end();
   }

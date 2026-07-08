@@ -11,7 +11,7 @@ const express = require("express");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const pool = require("../db/pool");
-const { requireAuth, requirePlatformAdmin } = require("../middleware/auth");
+const { requireAuth, requirePlatformAdmin, revokeUserSessions } = require("../middleware/auth");
 const { getOrgModules, MODULES, MODULE_KEYS } = require("../orgModules");
 
 const router = express.Router();
@@ -141,6 +141,7 @@ router.post("/organizations/:id/reset-admin", requireAuth, requirePlatformAdmin,
     const tempPassword = crypto.randomBytes(9).toString("base64").replace(/[/+=]/g, "");
     const passwordHash = await bcrypt.hash(tempPassword, 12);
     await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [passwordHash, u.rows[0].id]);
+    await revokeUserSessions(u.rows[0].id);
     res.json({
       email: u.rows[0].email,
       fullName: u.rows[0].full_name,

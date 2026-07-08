@@ -1,7 +1,7 @@
 // src/pages/SettingsPage.jsx
 
 import { useState } from "react";
-import { api } from "../api/client";
+import { api, setToken } from "../api/client";
 import { useAuth } from "../context/AuthContext.jsx";
 
 export default function SettingsPage() {
@@ -18,8 +18,11 @@ export default function SettingsPage() {
     setSuccess("");
     setSubmitting(true);
     try {
-      await api.post("/auth/change-password", { currentPassword, newPassword });
-      setSuccess("Password updated successfully.");
+      const data = await api.post("/auth/change-password", { currentPassword, newPassword });
+      // The server revokes all existing tokens and issues a fresh one for this
+      // session, so we keep the user signed in here while signing out elsewhere.
+      if (data && data.token) setToken(data.token);
+      setSuccess(data?.message || "Password updated successfully.");
       setCurrentPassword("");
       setNewPassword("");
     } catch (err) {

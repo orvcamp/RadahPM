@@ -3,6 +3,8 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const securityHeaders = require("./middleware/securityHeaders");
+const { globalLimiter } = require("./middleware/rateLimit");
 
 const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/users");
@@ -23,6 +25,12 @@ const trashRoutes = require("./routes/trash");
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+// Railway terminates TLS and proxies to us. Trusting one proxy hop makes
+// req.ip the real client address, which the rate limiter depends on.
+app.set("trust proxy", 1);
+app.disable("x-powered-by");
+app.use(securityHeaders);
+
 // CORS: in production, set CORS_ORIGIN to your deployed frontend URL
 // (e.g. https://radah-pm.vercel.app). Comma-separate multiple origins.
 const allowedOrigins = (process.env.CORS_ORIGIN || "http://localhost:5173")
@@ -35,7 +43,10 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
+
+// Generous catch-all rate limit (auth endpoints have stricter limits of their own).
+app.use("/api", globalLimiter);
 
 // Health check — useful for Railway/Render deploy verification
 app.get("/api/health", (req, res) => {
