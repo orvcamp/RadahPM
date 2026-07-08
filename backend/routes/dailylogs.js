@@ -15,7 +15,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const pool = require("../db/pool");
-const { requireAuth, isInternal } = require("../middleware/auth");
+const { requireAuth, requireRole, isInternal } = require("../middleware/auth");
 const { userCanAccessProject, resourceProjectId } = require("./projects");
 const r2 = require("../db/r2");
 const mail = require("../mail");
