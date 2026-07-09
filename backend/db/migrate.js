@@ -52,6 +52,7 @@ async function migrate() {
     await runSqlFile("migrations_phase3_schedule_activities.sql", "Migration (schedule activities)");
     await runSqlFile("migrations_phase4_billing.sql", "Migration (billing / pay applications)");
     await runSqlFile("migrations_phase4_billing_pdf.sql", "Migration (billing PDF filing link)");
+    await runSqlFile("migrations_phase4_folder_reorder.sql", "Migration (rename folder template for reorder)");
   } finally {
     await pool.end();
   }
