@@ -53,6 +53,7 @@ async function migrate() {
     await runSqlFile("migrations_phase4_billing.sql", "Migration (billing / pay applications)");
     await runSqlFile("migrations_phase4_billing_pdf.sql", "Migration (billing PDF filing link)");
     await runSqlFile("migrations_phase4_folder_reorder.sql", "Migration (rename folder template for reorder)");
+    await runSqlFile("migrations_phase4_folder_dedupe.sql", "Migration (dedupe folders + prevent recurrence)");
   } finally {
     await pool.end();
   }

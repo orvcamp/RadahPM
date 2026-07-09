@@ -524,12 +524,26 @@ router.post(
           [projectId, name, parentId]
         );
         if (found.rows[0]) return found.rows[0].id;
-        const ins = await client.query(
-          "INSERT INTO document_folders (project_id, parent_folder_id, name, created_by) VALUES ($1, $2, $3, $4) RETURNING id",
-          [projectId, parentId, name, req.user.id]
-        );
-        created++;
-        return ins.rows[0].id;
+        try {
+          const ins = await client.query(
+            "INSERT INTO document_folders (project_id, parent_folder_id, name, created_by) VALUES ($1, $2, $3, $4) RETURNING id",
+            [projectId, parentId, name, req.user.id]
+          );
+          created++;
+          return ins.rows[0].id;
+        } catch (err) {
+          // Lost a race to a concurrent request (e.g. the button was
+          // double-submitted) — the unique constraint caught it, so the
+          // row now exists. Just find it instead of failing the whole run.
+          if (err.code === "23505") {
+            const retry = await client.query(
+              "SELECT id FROM document_folders WHERE project_id = $1 AND name = $2 AND parent_folder_id IS NOT DISTINCT FROM $3",
+              [projectId, name, parentId]
+            );
+            if (retry.rows[0]) return retry.rows[0].id;
+          }
+          throw err;
+        }
       }
       for (const top of FOLDER_TEMPLATE) {
         const topId = await findOrCreate(top.name, null);
