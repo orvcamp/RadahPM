@@ -16,6 +16,7 @@ import ProjectScheduleCard from "../components/ProjectScheduleCard.jsx";
 import ScheduleActivitiesCard from "../components/ScheduleActivitiesCard.jsx";
 import TrashTab from "../components/TrashTab.jsx";
 import LogsTab from "../components/LogsTab.jsx";
+import ReportsTab from "../components/ReportsTab.jsx";
 import DocumentViewerModal from "../components/DocumentViewerModal.jsx";
 import { STAGES, stageIndex, TAB_GROUPS, TAB_LABELS, isStageRelevant } from "../config.js";
 
@@ -257,6 +258,7 @@ export default function ProjectDetailPage() {
           if (key === "rfis") return modOn("rfis");
           if (key === "submittals") return modOn("submittals");
           if (key === "logs") return modOn("logs");
+          if (key === "reports") return user.role !== "trade_partner" && modOn("reports");
           if (key === "trash") return user.role === "admin";
           return true; // timeline, tasks, phases, team
         };
@@ -442,6 +444,8 @@ export default function ProjectDetailPage() {
       {tab === "submittals" && modOn("submittals") && <SubmittalsTab projectId={id} />}
 
       {tab === "logs" && modOn("logs") && <LogsTab projectId={id} />}
+
+      {tab === "reports" && user.role !== "trade_partner" && modOn("reports") && <ReportsTab projectId={id} />}
 
       {tab === "trash" && user.role === "admin" && <TrashTab projectId={id} />}
 

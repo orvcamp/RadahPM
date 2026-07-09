@@ -30,6 +30,7 @@ export const TAB_GROUPS = [
   { key: "documents", label: "Documents", tabs: ["documents"] },
   { key: "cost",      label: "Cost",      tabs: ["budget", "changeorders"] },
   { key: "field",     label: "Field",     tabs: ["dailylogs", "rfis", "submittals"] },
+  { key: "reports",   label: "Reports",   tabs: ["reports"] },
 ];
 
 export const TAB_LABELS = {
@@ -45,6 +46,7 @@ export const TAB_LABELS = {
   submittals: "Submittals",
   logs: "Logs",
   trash: "Deleted Items",
+  reports: "Reports",
 };
 
 // Which tabs are most relevant at each stage (highlight only — never hides).
@@ -56,8 +58,8 @@ export const STAGE_RELEVANT_TABS = {
   mobilization: ["logs", "phases", "team", "submittals", "documents"],
   construction: ["logs", "dailylogs", "rfis", "submittals", "changeorders", "budget"],
   substantial_completion: ["logs", "changeorders", "budget", "documents", "dailylogs"],
-  closeout: ["logs", "documents", "budget", "changeorders"],
-  complete: ["documents", "budget"],
+  closeout: ["logs", "documents", "budget", "changeorders", "reports"],
+  complete: ["documents", "budget", "reports"],
 };
 export const isStageRelevant = (stage, tabKey) =>
   (STAGE_RELEVANT_TABS[stage || "lead"] || []).includes(tabKey);
