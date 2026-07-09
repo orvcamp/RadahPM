@@ -184,6 +184,7 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
   const [busy, setBusy] = useState(false);
   const [editingItems, setEditingItems] = useState({}); // id -> { thisPeriod, stored }
   const [waiverModal, setWaiverModal] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const fileInputs = {};
 
   const load = useCallback(async () => {
@@ -272,6 +273,38 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
     }
   }
 
+  async function exportPdf() {
+    setExportingPdf(true);
+    try {
+      const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
+      const token = localStorage.getItem("radah_pm_token");
+      const res = await fetch(`${API_URL}/billing/pay-apps/${payAppId}/pdf`, {
+        headers: { Authorization: token ? `Bearer ${token}` : "" },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Export failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      const fileName = match ? match[1] : `Pay Application ${payApp.applicationNumber}.pdf`;
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      await load(); // pick up the new pdfDocumentId so "View Filed Copy" appears/updates
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
   async function downloadWaiverFile(waiver) {
     try {
       const { downloadUrl } = await api.get(`/documents/${waiver.documentId}/download-url`);
@@ -299,8 +332,25 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
             {" · "}Retention {payApp.retentionPercent}%
           </span>
         </div>
-        <span className={`badge ${STATUS_BADGE[payApp.status] || ""}`} style={{ fontSize: "0.8rem", padding: "0.4rem 0.8rem" }}>{payApp.status}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
+          {payApp.pdfDocumentId && (
+            <button className="btn btn-outline btn-sm" onClick={async () => {
+              try {
+                const { downloadUrl } = await api.get(`/documents/${payApp.pdfDocumentId}/download-url`);
+                window.open(downloadUrl, "_blank");
+              } catch (err) { alert(err.message); }
+            }}>View Filed Copy</button>
+          )}
+          <button className="btn btn-outline btn-sm" disabled={exportingPdf} onClick={exportPdf}>
+            {exportingPdf ? "Exporting…" : "Export PDF"}
+          </button>
+          <span className={`badge ${STATUS_BADGE[payApp.status] || ""}`} style={{ fontSize: "0.8rem", padding: "0.4rem 0.8rem" }}>{payApp.status}</span>
+        </div>
       </div>
+
+      <p className="text-sm text-steel" style={{ marginTop: "-0.6rem", marginBottom: "1rem" }}>
+        Exporting also files a copy under Documents → 06 - Cost &amp; Billing → Pay Applications, replacing any previously filed copy.
+      </p>
 
       <div className="card" style={cardStyle}>
         <div style={statGrid}>

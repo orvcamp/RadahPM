@@ -84,6 +84,22 @@ async function getViewUrl(storageKey, contentType) {
 }
 
 /**
+ * Upload a buffer directly to the bucket from the server (as opposed to a
+ * presigned URL the browser uploads through). Used for files the backend
+ * generates itself, like an exported pay application PDF, where there's no
+ * browser-side file to hand a presigned URL to.
+ */
+async function putObject(storageKey, body, contentType) {
+  const command = new PutObjectCommand({
+    Bucket: BUCKET,
+    Key: storageKey,
+    Body: body,
+    ContentType: contentType || "application/octet-stream",
+  });
+  return client.send(command);
+}
+
+/**
  * Delete an object from the bucket.
  */
 async function deleteObject(storageKey) {
@@ -91,4 +107,4 @@ async function deleteObject(storageKey) {
   return client.send(command);
 }
 
-module.exports = { isConfigured, getUploadUrl, getDownloadUrl, getViewUrl, deleteObject };
+module.exports = { isConfigured, getUploadUrl, getDownloadUrl, getViewUrl, putObject, deleteObject };

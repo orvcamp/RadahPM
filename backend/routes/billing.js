@@ -20,6 +20,7 @@
 
 const express = require("express");
 const crypto = require("crypto");
+const PDFDocument = require("pdfkit");
 const pool = require("../db/pool");
 const { requireAuth, requireRole, isInternal } = require("../middleware/auth");
 const { userCanAccessProject } = require("./projects");
@@ -199,6 +200,7 @@ function mapPayApp(row) {
     decidedByName: row.decided_by_name || null,
     decidedAt: row.decided_at,
     paidAt: row.paid_at,
+    pdfDocumentId: row.pdf_document_id || null,
     createdAt: row.created_at,
   };
 }
@@ -769,4 +771,189 @@ router.post(
   }
 );
 
+// ============================================================
+// PDF EXPORT — generates the pay application as a PDF, downloads it to the
+// browser, and files (or re-files) a copy under this project's Documents,
+// in the standard "06 - Cost & Billing / Pay Applications" folder.
+// ============================================================
+
+// Idempotent find-or-create down a folder path, mirroring the standard
+// folder template logic in routes/documents.js.
+async function findOrCreateFolderPath(client, projectId, pathParts, userId) {
+  let parentId = null;
+  for (const name of pathParts) {
+    const found = await client.query(
+      "SELECT id FROM document_folders WHERE project_id = $1 AND name = $2 AND parent_folder_id IS NOT DISTINCT FROM $3",
+      [projectId, name, parentId]
+    );
+    if (found.rows[0]) {
+      parentId = found.rows[0].id;
+    } else {
+      const ins = await client.query(
+        "INSERT INTO document_folders (project_id, parent_folder_id, name, created_by) VALUES ($1, $2, $3, $4) RETURNING id",
+        [projectId, parentId, name, userId]
+      );
+      parentId = ins.rows[0].id;
+    }
+  }
+  return parentId;
+}
+
+function dollarsStr(cents) {
+  const n = centsOf(cents);
+  const sign = n < 0 ? "-" : "";
+  return `${sign}$${(Math.abs(n) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function renderPayAppPdfBuffer(payApp, project) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 40, size: "LETTER" });
+    const chunks = [];
+    doc.on("data", (c) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    doc.fontSize(18).fillColor("#0B1F3A").text(`Pay Application #${payApp.applicationNumber}`);
+    doc.moveDown(0.2);
+    doc.fontSize(11).fillColor("#333333").text(project.name);
+    if (project.clientOrgName) doc.text(project.clientOrgName);
+    doc.fontSize(9).fillColor("#6b7280").text(
+      `Period: ${payApp.periodStart ? new Date(payApp.periodStart).toLocaleDateString() : "?"} – ${payApp.periodEnd ? new Date(payApp.periodEnd).toLocaleDateString() : "?"}   ·   Status: ${payApp.status}   ·   Retention: ${payApp.retentionPercent}%`
+    );
+    doc.fontSize(9).fillColor("#6b7280").text(`Generated ${new Date().toLocaleString()}`);
+    doc.moveDown(0.8);
+    doc.strokeColor("#E2E1DA").moveTo(doc.x, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).stroke();
+    doc.moveDown(0.6);
+    doc.fillColor("#000000");
+
+    // ---- line items table ----
+    const columns = [
+      { key: "description", header: "Description", width: 160 },
+      { key: "scheduled", header: "Scheduled", width: 70, align: "right" },
+      { key: "previous", header: "Previous", width: 65, align: "right" },
+      { key: "period", header: "This Period", width: 65, align: "right" },
+      { key: "stored", header: "Stored", width: 60, align: "right" },
+      { key: "total", header: "Total", width: 70, align: "right" },
+      { key: "pct", header: "%", width: 35, align: "right" },
+    ];
+    const startX = doc.page.margins.left;
+    let y = doc.y;
+    const rowHeight = 18;
+    function drawHeader() {
+      let x = startX;
+      const totalWidth = columns.reduce((s, c) => s + c.width, 0);
+      doc.rect(startX, y, totalWidth, rowHeight).fill("#0B1F3A");
+      doc.fillColor("#ffffff").fontSize(8);
+      for (const c of columns) { doc.text(c.header, x + 3, y + 5, { width: c.width - 6, align: c.align || "left" }); x += c.width; }
+      y += rowHeight;
+      doc.fillColor("#000000");
+    }
+    drawHeader();
+    let i = 0;
+    for (const it of payApp.items) {
+      if (y + rowHeight > doc.page.height - doc.page.margins.bottom) { doc.addPage(); y = doc.page.margins.top; drawHeader(); }
+      const totalWidth = columns.reduce((s, c) => s + c.width, 0);
+      if (i % 2 === 1) { doc.rect(startX, y, totalWidth, rowHeight).fill("#F7F6F2"); doc.fillColor("#000000"); }
+      let x = startX;
+      doc.fontSize(8).fillColor("#1a1a1a");
+      const vals = {
+        description: it.description,
+        scheduled: dollarsStr(it.scheduledValueCents),
+        previous: dollarsStr(it.previousCompletedCents),
+        period: dollarsStr(it.thisPeriodCents),
+        stored: dollarsStr(it.materialsStoredCents),
+        total: dollarsStr(it.totalCompletedAndStoredCents),
+        pct: `${it.percentComplete}%`,
+      };
+      for (const c of columns) { doc.text(vals[c.key], x + 3, y + 5, { width: c.width - 6, align: c.align || "left" }); x += c.width; }
+      y += rowHeight;
+      i++;
+    }
+    doc.y = y + 14;
+
+    // ---- totals ----
+    const t = payApp.totals;
+    function kv(label, value, bold) {
+      doc.fontSize(10).fillColor("#6b7280").text(label, doc.page.margins.left, doc.y, { continued: true, width: 220 });
+      doc.fillColor(bold ? "#0B1F3A" : "#000000").text(`  ${value}`, { align: "left" });
+    }
+    kv("Scheduled Value", dollarsStr(t.scheduledValueCents));
+    kv("Completed & Stored to Date", dollarsStr(t.totalCompletedAndStoredCents));
+    kv("Percent Complete", `${t.percentComplete}%`);
+    kv("Retention", dollarsStr(t.retentionCents));
+    kv("Total Earned Less Retention", dollarsStr(t.totalEarnedLessRetentionCents));
+    kv("Less Previous Payments", dollarsStr(t.previousPaymentsCents));
+    kv("Current Payment Due", dollarsStr(t.currentPaymentDueCents), true);
+    kv("Balance to Finish", dollarsStr(t.balanceToFinishCents));
+
+    // ---- lien waivers ----
+    if (payApp.lienWaivers.length > 0) {
+      doc.moveDown(1);
+      doc.fontSize(12).fillColor("#0B1F3A").text("Lien Waivers");
+      doc.moveDown(0.2);
+      doc.fontSize(9).fillColor("#000000");
+      for (const w of payApp.lienWaivers) {
+        doc.text(`${w.vendorName} — ${w.waiverType.replace(/_/g, " ")} — ${dollarsStr(w.amountCents)} — ${w.status}`);
+      }
+    }
+
+    doc.end();
+  });
+}
+
+// GET /api/billing/pay-apps/:id/pdf
+router.get("/billing/pay-apps/:id/pdf", requireAuth, requireModule("billing"), guardPayApp, async (req, res) => {
+  try {
+    const payApp = await fetchFullPayApp(req.params.id);
+    if (!payApp) return res.status(404).json({ error: "Pay application not found." });
+    const projRes = await pool.query("SELECT name, client_org_name FROM projects WHERE id = $1", [payApp.projectId]);
+    const project = { name: projRes.rows[0]?.name || "Project", clientOrgName: projRes.rows[0]?.client_org_name || null };
+
+    const buffer = await renderPayAppPdfBuffer(payApp, project);
+    const fileName = `Pay Application ${payApp.applicationNumber}.pdf`;
+
+    // File (or re-file) a copy under Documents, if storage is configured.
+    // Filing failures never block the download — they're logged and skipped.
+    if (r2.isConfigured) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const folderId = await findOrCreateFolderPath(
+          client, payApp.projectId, ["06 - Cost & Billing", "Pay Applications"], req.user.id
+        );
+        // Soft-delete the previously filed copy of this pay app's PDF, if any.
+        if (payApp.pdfDocumentId) {
+          await client.query(
+            "UPDATE documents SET deleted_at = now(), deleted_by = $1 WHERE id = $2 AND deleted_at IS NULL",
+            [req.user.id, payApp.pdfDocumentId]
+          );
+        }
+        const storageKey = buildStorageKey(payApp.projectId, fileName);
+        await r2.putObject(storageKey, buffer, "application/pdf");
+        const docRes = await client.query(
+          `INSERT INTO documents (project_id, folder_id, storage_key, file_name, content_type, size_bytes, description, uploaded_by)
+           VALUES ($1, $2, $3, $4, 'application/pdf', $5, $6, $7) RETURNING id`,
+          [payApp.projectId, folderId, storageKey, fileName, buffer.length, `Pay Application #${payApp.applicationNumber}`, req.user.id]
+        );
+        await client.query("UPDATE pay_applications SET pdf_document_id = $1 WHERE id = $2", [docRes.rows[0].id, payApp.id]);
+        await client.query("COMMIT");
+      } catch (fileErr) {
+        await client.query("ROLLBACK").catch(() => {});
+        console.error("[radah-pm] pay app PDF filing error (download still proceeds):", fileErr);
+      } finally {
+        client.release();
+      }
+    }
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.send(buffer);
+  } catch (err) {
+    console.error("[radah-pm] pay app PDF export error:", err);
+    if (!res.headersSent) res.status(500).json({ error: "Something went wrong generating that PDF." });
+    else res.end();
+  }
+});
+
 module.exports = router;
+
