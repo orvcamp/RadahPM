@@ -352,7 +352,7 @@ export default function ReportsTab({ projectId }) {
       {loading && <div className="loading-spinner" />}
       {error && <div className="error-msg">{error}</div>}
 
-      {!loading && !error && payload && (
+      {!loading && !error && payload && payload.reportType === reportType && (
         <>
           {reportType === "status-summary" && <StatusSummaryView data={payload.data} />}
           {reportType === "budget-vs-actual" && <BudgetVsActualView data={payload.data} />}
