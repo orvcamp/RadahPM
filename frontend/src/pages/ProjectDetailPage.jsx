@@ -9,6 +9,7 @@ import TaskModal from "../components/TaskModal.jsx";
 import DocumentsTab from "../components/DocumentsTab.jsx";
 import BudgetTab from "../components/BudgetTab.jsx";
 import ChangeOrdersTab from "../components/ChangeOrdersTab.jsx";
+import BillingTab from "../components/BillingTab.jsx";
 import DailyLogsTab from "../components/DailyLogsTab.jsx";
 import RfisTab from "../components/RfisTab.jsx";
 import SubmittalsTab from "../components/SubmittalsTab.jsx";
@@ -254,6 +255,7 @@ export default function ProjectDetailPage() {
           if (key === "documents") return modOn("documents");
           if (key === "budget") return user.role !== "trade_partner" && modOn("budget");
           if (key === "changeorders") return user.role !== "trade_partner" && modOn("changeorders");
+          if (key === "billing") return user.role !== "trade_partner" && modOn("billing");
           if (key === "dailylogs") return modOn("dailylogs");
           if (key === "rfis") return modOn("rfis");
           if (key === "submittals") return modOn("submittals");
@@ -436,6 +438,8 @@ export default function ProjectDetailPage() {
       {tab === "budget" && user.role !== "trade_partner" && modOn("budget") && <BudgetTab projectId={id} />}
 
       {tab === "changeorders" && user.role !== "trade_partner" && modOn("changeorders") && <ChangeOrdersTab projectId={id} />}
+
+      {tab === "billing" && user.role !== "trade_partner" && modOn("billing") && <BillingTab projectId={id} />}
 
       {tab === "dailylogs" && modOn("dailylogs") && <DailyLogsTab projectId={id} />}
 

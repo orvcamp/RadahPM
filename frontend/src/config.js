@@ -28,7 +28,7 @@ export const stageIndex = (key) => Math.max(0, STAGES.findIndex((s) => s.key ===
 export const TAB_GROUPS = [
   { key: "overview",  label: "Overview",  tabs: ["timeline", "tasks", "phases", "team", "logs", "trash"] },
   { key: "documents", label: "Documents", tabs: ["documents"] },
-  { key: "cost",      label: "Cost",      tabs: ["budget", "changeorders"] },
+  { key: "cost",      label: "Cost",      tabs: ["budget", "changeorders", "billing"] },
   { key: "field",     label: "Field",     tabs: ["dailylogs", "rfis", "submittals"] },
   { key: "reports",   label: "Reports",   tabs: ["reports"] },
 ];
@@ -41,6 +41,7 @@ export const TAB_LABELS = {
   documents: "Documents",
   budget: "Budget",
   changeorders: "Change Orders",
+  billing: "Billing",
   dailylogs: "Daily Logs",
   rfis: "RFIs",
   submittals: "Submittals",
@@ -56,9 +57,9 @@ export const STAGE_RELEVANT_TABS = {
 
   preconstruction: ["logs", "phases", "budget", "rfis", "submittals", "documents"],
   mobilization: ["logs", "phases", "team", "submittals", "documents"],
-  construction: ["logs", "dailylogs", "rfis", "submittals", "changeorders", "budget"],
-  substantial_completion: ["logs", "changeorders", "budget", "documents", "dailylogs"],
-  closeout: ["logs", "documents", "budget", "changeorders", "reports"],
+  construction: ["logs", "dailylogs", "rfis", "submittals", "changeorders", "budget", "billing"],
+  substantial_completion: ["logs", "changeorders", "budget", "billing", "documents", "dailylogs"],
+  closeout: ["logs", "documents", "budget", "changeorders", "billing", "reports"],
   complete: ["documents", "budget", "reports"],
 };
 export const isStageRelevant = (stage, tabKey) =>

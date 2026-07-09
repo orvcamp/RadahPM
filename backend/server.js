@@ -24,6 +24,7 @@ const trashRoutes = require("./routes/trash");
 const notificationRoutes = require("./routes/notifications");
 const logRoutes = require("./routes/logs");
 const reportRoutes = require("./routes/reports");
+const billingRoutes = require("./routes/billing");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -74,6 +75,7 @@ app.use("/api", trashRoutes); // Deleted Items (restore / purge)
 app.use("/api", notificationRoutes); // In-app notifications
 app.use("/api", logRoutes); // Project logs & registers
 app.use("/api", reportRoutes); // Reports (status summary, budget vs actual, RFI/submittal logs, daily log rollup)
+app.use("/api", billingRoutes); // Billing (pay applications, lien waivers)
 
 // 404 handler
 app.use((req, res) => {

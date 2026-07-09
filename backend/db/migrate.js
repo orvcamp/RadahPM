@@ -50,6 +50,7 @@ async function migrate() {
     await runSqlFile("migrations_phase3_logs.sql", "Migration (project logs)");
     await runSqlFile("migrations_phase3_budget_estimate.sql", "Migration (estimate fields on budget lines)");
     await runSqlFile("migrations_phase3_schedule_activities.sql", "Migration (schedule activities)");
+    await runSqlFile("migrations_phase4_billing.sql", "Migration (billing / pay applications)");
   } finally {
     await pool.end();
   }
