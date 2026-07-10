@@ -18,10 +18,11 @@ function isValidEmail(e) {
 
 /**
  * Send an email through Resend.
- * @param {{ to: string[], subject: string, html: string, replyTo?: string }} msg
+ * @param {{ to: string[], subject: string, html: string, replyTo?: string,
+ *           attachments?: { filename: string, content: Buffer }[] }} msg
  * @returns {Promise<{id: string}>}
  */
-async function send({ to, subject, html, replyTo }) {
+async function send({ to, subject, html, replyTo, attachments }) {
   if (!isConfigured) {
     const err = new Error("Email is not configured on the server.");
     err.code = "MAIL_NOT_CONFIGURED";
@@ -41,6 +42,19 @@ async function send({ to, subject, html, replyTo }) {
     html: html || "",
   };
   if (replyTo && isValidEmail(replyTo)) body.reply_to = replyTo;
+  if (Array.isArray(attachments) && attachments.length > 0) {
+    const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024; // 15MB combined, well under Resend's request limit
+    let totalBytes = 0;
+    body.attachments = attachments.map((a) => {
+      totalBytes += a.content.length;
+      return { filename: a.filename, content: a.content.toString("base64") };
+    });
+    if (totalBytes > MAX_ATTACHMENT_BYTES) {
+      const err = new Error("Attachment is too large to email. Try exporting a narrower date range.");
+      err.code = "MAIL_ATTACHMENT_TOO_LARGE";
+      throw err;
+    }
+  }
 
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",

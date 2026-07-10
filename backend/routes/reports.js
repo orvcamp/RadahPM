@@ -20,12 +20,16 @@
 const express = require("express");
 const PDFDocument = require("pdfkit");
 const ExcelJS = require("exceljs");
+const { PassThrough } = require("stream");
 const pool = require("../db/pool");
 const { requireAuth } = require("../middleware/auth");
 const { userCanAccessProject } = require("./projects");
 const { requireModule } = require("../orgModules");
+const mail = require("../mail");
 
 const router = express.Router();
+
+const APP_NAME = process.env.APP_NAME || "MangoDoe";
 
 // --- org-isolation guard (Phase 3 A2) ---
 function guardProject(req, res, next) {
@@ -372,7 +376,7 @@ router.get(
       } else {
         res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
         res.setHeader("Content-Disposition", `attachment; filename="${fileBase}.xlsx"`);
-        await renderXlsx(res, type, project, data);
+        await renderXlsxToResponse(res, type, project, data);
       }
     } catch (err) {
       console.error(`[radah-pm] report export (${req.query.type}, ${req.query.format}) error:`, err);
@@ -381,6 +385,92 @@ router.get(
       } else {
         res.end();
       }
+    }
+  }
+);
+
+// ============================================================
+// EMAIL A REPORT TO RECIPIENTS
+// POST /api/projects/:projectId/reports/email
+// Any project member EXCEPT trade partners (guardProject enforces this,
+// same as every other reports route).
+// Body: { type, format ('pdf'|'xlsx'), recipients: string[], note?, from?, to? }
+// ============================================================
+router.post(
+  "/projects/:projectId/reports/email",
+  requireAuth,
+  requireModule("reports"),
+  guardProject,
+  async (req, res) => {
+    if (!mail.isConfigured) {
+      return res.status(503).json({ error: "Email is not set up on the server yet. Please contact your administrator." });
+    }
+    const { type, format, recipients, note, from, to } = req.body || {};
+    if (!REPORT_TITLES[type]) {
+      return res.status(400).json({ error: "Unknown report type." });
+    }
+    if (format !== "pdf" && format !== "xlsx") {
+      return res.status(400).json({ error: "format must be 'pdf' or 'xlsx'." });
+    }
+    const list = Array.isArray(recipients)
+      ? recipients.map((e) => String(e).trim()).filter((e) => e)
+      : [];
+    const valid = list.filter((e) => mail.isValidEmail(e));
+    if (valid.length === 0) {
+      return res.status(400).json({ error: "Please provide at least one valid recipient email." });
+    }
+    if (valid.length > 25) {
+      return res.status(400).json({ error: "Too many recipients (max 25)." });
+    }
+
+    try {
+      const project = await getProjectHeader(req.params.projectId);
+      if (!project) return res.status(404).json({ error: "Project not found." });
+      const data = await buildReportData(type, req.params.projectId, { from, to });
+      const title = REPORT_TITLES[type];
+      const fileBase = `${project.name.replace(/[^a-zA-Z0-9._-]/g, "_")}-${type}`;
+
+      let fileBuffer;
+      if (format === "pdf") {
+        fileBuffer = await renderPdfBuffer(type, project, data);
+      } else {
+        const wb = buildWorkbook(type, project, data);
+        fileBuffer = Buffer.from(await wb.xlsx.writeBuffer());
+      }
+      const attachment = { filename: `${fileBase}.${format}`, content: fileBuffer };
+
+      const esc = mail.escapeHtml;
+      const senderName = req.user.fullName || req.user.email;
+      const dateStr = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+      const noteHtml = note && String(note).trim()
+        ? `<p style="margin:0 0 16px;padding:12px;background:#f7f6f2;border-left:3px solid #C9A227;">${esc(note).replace(/\n/g, "<br>")}</p>`
+        : "";
+
+      const html = `
+        <div style="font-family:Arial,Helvetica,sans-serif;color:#0B1F3A;max-width:640px;margin:0 auto;">
+          <h2 style="margin:0 0 4px;">${esc(title)} — ${esc(project.name)}</h2>
+          <p style="margin:0 0 16px;color:#6b7280;">Generated ${esc(dateStr)}</p>
+          ${noteHtml}
+          <p style="margin:0 0 16px;">The full report is attached as a ${format === "pdf" ? "PDF" : "spreadsheet"}.</p>
+          <hr style="border:none;border-top:1px solid #E2E1DA;margin:20px 0;">
+          <p style="font-size:12px;color:#9ca3af;">Sent by ${esc(senderName)} via ${APP_NAME}.</p>
+        </div>`;
+
+      await mail.send({
+        to: valid,
+        subject: `${title} — ${project.name} — ${dateStr}`,
+        html,
+        replyTo: req.user.email,
+        attachments: [attachment],
+      });
+
+      res.json({ message: `Report emailed to ${valid.length} recipient${valid.length === 1 ? "" : "s"}.` });
+    } catch (err) {
+      if (err.code && err.code.startsWith("MAIL_")) {
+        return res.status(502).json({ error: err.message });
+      }
+      console.error(`[radah-pm] email report (${type}, ${format}) error:`, err);
+      res.status(500).json({ error: "Something went wrong sending the email." });
     }
   }
 );
@@ -622,10 +712,28 @@ function renderPdf(res, type, project, data) {
   doc.end();
 }
 
+// Renders the same PDF as renderPdf(), but into an in-memory buffer instead
+// of streaming to an HTTP response — used for emailing a report as an
+// attachment rather than downloading it.
+function renderPdfBuffer(type, project, data) {
+  return new Promise((resolve, reject) => {
+    const stream = new PassThrough();
+    const chunks = [];
+    stream.on("data", (chunk) => chunks.push(chunk));
+    stream.on("end", () => resolve(Buffer.concat(chunks)));
+    stream.on("error", reject);
+    try {
+      renderPdf(stream, type, project, data);
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
 // ============================================================
 // Excel rendering (exceljs) — one sheet per report type.
 // ============================================================
-async function renderXlsx(res, type, project, data) {
+function buildWorkbook(type, project, data) {
   const wb = new ExcelJS.Workbook();
   wb.creator = "MangoDoe";
   wb.created = new Date();
@@ -808,6 +916,11 @@ async function renderXlsx(res, type, project, data) {
     }
   }
 
+  return wb;
+}
+
+async function renderXlsxToResponse(res, type, project, data) {
+  const wb = buildWorkbook(type, project, data);
   await wb.xlsx.write(res);
   res.end();
 }

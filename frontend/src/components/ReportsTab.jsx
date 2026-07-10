@@ -27,6 +27,8 @@ const statGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minma
 const statBox = { padding: "0.8rem 1rem", background: "var(--paper, #f7f6f2)", borderRadius: 8, border: "1px solid var(--line)" };
 const statLabel = { fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--steel)", marginBottom: "0.25rem" };
 const statValue = { fontSize: "1.3rem", fontWeight: 700, color: "var(--navy, #0B1F3A)" };
+const inputStyle = { width: "100%", border: "1.5px solid var(--line)", borderRadius: "6px", padding: "0.55rem 0.8rem", fontSize: "0.88rem" };
+const labelStyle = { display: "block", fontSize: "0.78rem", color: "var(--steel)", marginBottom: "0.3rem", textTransform: "uppercase", letterSpacing: "0.03em" };
 
 function Stat({ label, value }) {
   return (
@@ -260,6 +262,92 @@ function DailyLogRollupView({ data, from, to, setFrom, setTo, onFilter }) {
   );
 }
 
+// ---------- email modal ----------
+function EmailReportModal({ projectId, reportType, reportLabel, from, to, onClose }) {
+  const [recipients, setRecipients] = useState("");
+  const [note, setNote] = useState("");
+  const [format, setFormat] = useState("pdf");
+  const [loadingTeam, setLoadingTeam] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const d = await api.get(`/projects/${projectId}/members`);
+        if (!active) return;
+        setRecipients((d.members || []).map((m) => m.email).filter(Boolean).join(", "));
+      } catch { /* leave blank */ } finally {
+        if (active) setLoadingTeam(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [projectId]);
+
+  async function send() {
+    setError("");
+    const list = recipients.split(/[,\n;]+/).map((e) => e.trim()).filter(Boolean);
+    if (list.length === 0) return setError("Add at least one recipient email.");
+    setSending(true);
+    try {
+      const body = { type: reportType, format, recipients: list, note: note.trim() || null };
+      if (reportType === "daily-log-rollup") {
+        if (from) body.from = from;
+        if (to) body.to = to;
+      }
+      const r = await api.post(`/projects/${projectId}/reports/email`, body);
+      setDone(r.message || "Email sent.");
+    } catch (err) { setError(err.message); } finally { setSending(false); }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+        <div className="modal-header">
+          <h3 style={{ fontSize: "1.1rem", textTransform: "uppercase" }}>Email Report</h3>
+          <button className="modal-close" onClick={onClose}>&times;</button>
+        </div>
+        {error && <div className="error-msg">{error}</div>}
+        {done ? (
+          <>
+            <div className="success-msg">{done}</div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "1rem" }}>
+              <button className="btn btn-gold" onClick={onClose}>Done</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-steel" style={{ marginBottom: "1rem" }}>
+              {reportLabel} · pre-filled with the project team — edit as needed.
+            </p>
+            <div style={{ marginBottom: "1rem" }}>
+              <label style={labelStyle}>Recipients (comma-separated)</label>
+              <textarea value={recipients} onChange={(e) => setRecipients(e.target.value)} style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} placeholder={loadingTeam ? "Loading team…" : "name@example.com"} />
+            </div>
+            <div style={{ marginBottom: "1rem" }}>
+              <label style={labelStyle}>Attach as</label>
+              <select value={format} onChange={(e) => setFormat(e.target.value)} style={inputStyle}>
+                <option value="pdf">PDF</option>
+                <option value="xlsx">Excel</option>
+              </select>
+            </div>
+            <div style={{ marginBottom: "1.2rem" }}>
+              <label style={labelStyle}>Note (optional)</label>
+              <textarea value={note} onChange={(e) => setNote(e.target.value)} style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} placeholder="Add a short message at the top of the email…" />
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem" }}>
+              <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+              <button className="btn btn-gold" disabled={sending} onClick={send}>{sending ? "Sending…" : "Send Email"}</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ---------- main tab ----------
 
 export default function ReportsTab({ projectId }) {
@@ -268,6 +356,7 @@ export default function ReportsTab({ projectId }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(null); // "pdf" | "xlsx" | null
+  const [emailOpen, setEmailOpen] = useState(false);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
@@ -346,6 +435,9 @@ export default function ReportsTab({ projectId }) {
           <button className="btn btn-outline btn-sm" disabled={exporting !== null || loading} onClick={() => exportReport("xlsx")}>
             {exporting === "xlsx" ? "Exporting…" : "Export Excel"}
           </button>
+          <button className="btn btn-gold btn-sm" disabled={loading} onClick={() => setEmailOpen(true)}>
+            Email
+          </button>
         </div>
       </div>
 
@@ -362,6 +454,17 @@ export default function ReportsTab({ projectId }) {
             <DailyLogRollupView data={payload.data} from={from} to={to} setFrom={setFrom} setTo={setTo} onFilter={load} />
           )}
         </>
+      )}
+
+      {emailOpen && (
+        <EmailReportModal
+          projectId={projectId}
+          reportType={reportType}
+          reportLabel={REPORT_TYPES.find((rt) => rt.key === reportType)?.label || "Report"}
+          from={from}
+          to={to}
+          onClose={() => setEmailOpen(false)}
+        />
       )}
     </div>
   );
