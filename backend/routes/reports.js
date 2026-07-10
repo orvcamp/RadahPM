@@ -439,12 +439,20 @@ function pdfTable(doc, columns, rows) {
       y = doc.page.margins.top;
       drawHeader();
     }
-    if (i % 2 === 1) {
+    const isTotal = Boolean(row.__total);
+    if (isTotal) {
+      // Bold total row with a top border, no zebra shading — mirrors the
+      // bold TOTAL row already used in the Excel export of this report,
+      // so PDF and Excel line up visually.
+      const tableWidth = columns.reduce((s, c) => s + c.width, 0);
+      doc.strokeColor("#0B1F3A").lineWidth(1)
+        .moveTo(startX, y).lineTo(startX + tableWidth, y).stroke();
+    } else if (i % 2 === 1) {
       doc.rect(startX, y, columns.reduce((s, c) => s + c.width, 0), rowHeight).fill("#F7F6F2");
       doc.fillColor("#000000");
     }
     let x = startX;
-    doc.fontSize(9).fillColor("#1a1a1a");
+    doc.fontSize(9).fillColor("#1a1a1a").font(isTotal ? "Helvetica-Bold" : "Helvetica");
     for (const c of columns) {
       const val = row[c.key] === null || row[c.key] === undefined ? "—" : String(row[c.key]);
       doc.text(val, x + 4, y + 5, { width: c.width - 8, align: c.align || "left" });
@@ -511,19 +519,24 @@ function renderPdf(res, type, project, data) {
         { key: "actual", header: "Actual", width: 95, align: "right" },
         { key: "remaining", header: "Remaining", width: 95, align: "right" },
       ],
-      data.categories.map((c) => ({
-        name: c.name,
-        budgeted: dollars(c.budgetedCents),
-        committed: dollars(c.committedCents),
-        actual: dollars(c.actualCents),
-        remaining: dollars(c.remainingCents),
-      }))
+      [
+        ...data.categories.map((c) => ({
+          name: c.name,
+          budgeted: dollars(c.budgetedCents),
+          committed: dollars(c.committedCents),
+          actual: dollars(c.actualCents),
+          remaining: dollars(c.remainingCents),
+        })),
+        {
+          __total: true,
+          name: "Totals",
+          budgeted: dollars(data.totals.budgetedCents),
+          committed: dollars(data.totals.committedCents),
+          actual: dollars(data.totals.actualCents),
+          remaining: dollars(data.totals.remainingCents),
+        },
+      ]
     );
-    pdfSectionTitle(doc, "Totals");
-    pdfKeyValueRow(doc, "Budgeted", dollars(data.totals.budgetedCents));
-    pdfKeyValueRow(doc, "Committed", dollars(data.totals.committedCents));
-    pdfKeyValueRow(doc, "Actual", dollars(data.totals.actualCents));
-    pdfKeyValueRow(doc, "Remaining", dollars(data.totals.remainingCents));
   }
 
   if (type === "rfi-log") {
