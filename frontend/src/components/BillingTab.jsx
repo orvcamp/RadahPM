@@ -25,6 +25,20 @@ function parseDollarsToCents(str) {
 function centsToInput(cents) {
   return (Number(cents) / 100 || 0).toFixed(2);
 }
+// "This Period" can be entered as a dollar amount or as a percent of that
+// line's Scheduled Value — these keep the two representations in sync.
+function percentFromDollarInput(dollarStr, scheduledValueCents) {
+  if (!scheduledValueCents) return "0.00";
+  const cents = parseDollarsToCents(dollarStr);
+  if (Number.isNaN(cents)) return "0.00";
+  return ((cents / scheduledValueCents) * 100).toFixed(2);
+}
+function dollarInputFromPercent(percentStr, scheduledValueCents) {
+  const pct = parseFloat(String(percentStr).trim());
+  if (!Number.isFinite(pct)) return "0.00";
+  const cents = Math.round((pct / 100) * scheduledValueCents);
+  return centsToInput(cents);
+}
 
 const STATUS_BADGE = {
   draft: "badge-not_started",
@@ -182,7 +196,8 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [editingItems, setEditingItems] = useState({}); // id -> { thisPeriod, stored }
+  const [editingItems, setEditingItems] = useState({}); // id -> { thisPeriod, thisPeriodPercent, stored }
+  const [thisPeriodMode, setThisPeriodMode] = useState("dollar"); // "dollar" | "percent"
   const [waiverModal, setWaiverModal] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const fileInputs = {};
@@ -194,7 +209,14 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
       const d = await api.get(`/billing/pay-apps/${payAppId}`);
       setPayApp(d.payApp);
       const edits = {};
-      for (const it of d.payApp.items) edits[it.id] = { thisPeriod: centsToInput(it.thisPeriodCents), stored: centsToInput(it.materialsStoredCents) };
+      for (const it of d.payApp.items) {
+        const thisPeriod = centsToInput(it.thisPeriodCents);
+        edits[it.id] = {
+          thisPeriod,
+          thisPeriodPercent: percentFromDollarInput(thisPeriod, it.scheduledValueCents),
+          stored: centsToInput(it.materialsStoredCents),
+        };
+      }
       setEditingItems(edits);
     } catch (err) {
       setError(err.message);
@@ -391,7 +413,33 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
               <th>Description</th>
               <th style={{ textAlign: "right" }}>Scheduled Value</th>
               <th style={{ textAlign: "right" }}>Previous</th>
-              <th style={{ textAlign: "right" }}>This Period</th>
+              <th style={{ textAlign: "right" }}>
+                This Period
+                {isDraft && canManage && (
+                  <span style={{ display: "inline-flex", marginLeft: 6, border: "1px solid var(--line)", borderRadius: 4, overflow: "hidden", verticalAlign: "middle" }}>
+                    <button
+                      type="button"
+                      onClick={() => setThisPeriodMode("dollar")}
+                      title="Enter this period as a dollar amount"
+                      style={{
+                        padding: "1px 6px", fontSize: "0.68rem", border: "none", cursor: "pointer",
+                        background: thisPeriodMode === "dollar" ? "var(--navy, #0B1F3A)" : "transparent",
+                        color: thisPeriodMode === "dollar" ? "#fff" : "inherit",
+                      }}
+                    >$</button>
+                    <button
+                      type="button"
+                      onClick={() => setThisPeriodMode("percent")}
+                      title="Enter this period as a % of Scheduled Value"
+                      style={{
+                        padding: "1px 6px", fontSize: "0.68rem", border: "none", cursor: "pointer",
+                        background: thisPeriodMode === "percent" ? "var(--navy, #0B1F3A)" : "transparent",
+                        color: thisPeriodMode === "percent" ? "#fff" : "inherit",
+                      }}
+                    >%</button>
+                  </span>
+                )}
+              </th>
               <th style={{ textAlign: "right" }}>Stored</th>
               <th style={{ textAlign: "right" }}>Total</th>
               <th style={{ textAlign: "right" }}>% Complete</th>
@@ -400,7 +448,7 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
           </thead>
           <tbody>
             {payApp.items.map((it) => {
-              const edit = editingItems[it.id] || { thisPeriod: "0.00", stored: "0.00" };
+              const edit = editingItems[it.id] || { thisPeriod: "0.00", thisPeriodPercent: "0.00", stored: "0.00" };
               return (
                 <tr key={it.id}>
                   <td>{it.description}</td>
@@ -408,11 +456,39 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
                   <td style={{ textAlign: "right" }}>{fmtMoney(it.previousCompletedCents)}</td>
                   <td style={{ textAlign: "right" }}>
                     {isDraft && canManage ? (
-                      <input
-                        value={edit.thisPeriod}
-                        onChange={(e) => setEditingItems((p) => ({ ...p, [it.id]: { ...p[it.id], thisPeriod: e.target.value } }))}
-                        style={{ width: 100, textAlign: "right", border: "1px solid var(--line)", borderRadius: 4, padding: "0.3rem 0.5rem", fontSize: "0.82rem" }}
-                      />
+                      thisPeriodMode === "percent" && it.scheduledValueCents > 0 ? (
+                        <div>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                            <input
+                              value={edit.thisPeriodPercent}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setEditingItems((p) => ({
+                                  ...p,
+                                  [it.id]: { ...p[it.id], thisPeriodPercent: v, thisPeriod: dollarInputFromPercent(v, it.scheduledValueCents) },
+                                }));
+                              }}
+                              style={{ width: 60, textAlign: "right", border: "1px solid var(--line)", borderRadius: 4, padding: "0.3rem 0.5rem", fontSize: "0.82rem" }}
+                            />
+                            <span className="text-sm text-steel">%</span>
+                          </span>
+                          <div className="text-sm text-steel" style={{ marginTop: 2 }}>
+                            {fmtMoney(parseDollarsToCents(edit.thisPeriod || "0"))}
+                          </div>
+                        </div>
+                      ) : (
+                        <input
+                          value={edit.thisPeriod}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setEditingItems((p) => ({
+                              ...p,
+                              [it.id]: { ...p[it.id], thisPeriod: v, thisPeriodPercent: percentFromDollarInput(v, it.scheduledValueCents) },
+                            }));
+                          }}
+                          style={{ width: 100, textAlign: "right", border: "1px solid var(--line)", borderRadius: 4, padding: "0.3rem 0.5rem", fontSize: "0.82rem" }}
+                        />
+                      )
                     ) : fmtMoney(it.thisPeriodCents)}
                   </td>
                   <td style={{ textAlign: "right" }}>
