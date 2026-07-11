@@ -24,7 +24,7 @@ const { PassThrough } = require("stream");
 const pool = require("../db/pool");
 const { requireAuth } = require("../middleware/auth");
 const { userCanAccessProject } = require("./projects");
-const { requireModule } = require("../orgModules");
+const { requireModule, getOrgModules } = require("../orgModules");
 const mail = require("../mail");
 
 const router = express.Router();
@@ -300,13 +300,24 @@ async function getDailyLogRollup(projectId, from, to) {
   return { from: from || null, to: to || null, logs, manpowerByTrade: Object.values(byTrade), totals };
 }
 
-const REPORT_TITLES = {
-  "status-summary": "Project Status Summary",
-  "budget-vs-actual": "Budget vs. Actual",
-  "rfi-log": "RFI Log",
-  "submittal-log": "Submittal Log",
-  "daily-log-rollup": "Daily Log Rollup",
-};
+// Registry of available report types. Each entry's `module` is the
+// capability module it's most tied to (used only to filter the /reports/types
+// listing below — existing per-route gating stays requireModule("reports"),
+// unchanged, so this doesn't alter any existing route's access behavior).
+// `verticals` is which of the platform's products this report type applies
+// to; all five are Construction-only today, same as everything else, so
+// this is metadata for the future Projects/Facilities report types to slot
+// alongside, not a behavior change.
+const REPORT_REGISTRY = [
+  { key: "status-summary", title: "Project Status Summary", module: "reports", verticals: ["construction"] },
+  { key: "budget-vs-actual", title: "Budget vs. Actual", module: "budget", verticals: ["construction"] },
+  { key: "rfi-log", title: "RFI Log", module: "rfis", verticals: ["construction"] },
+  { key: "submittal-log", title: "Submittal Log", module: "submittals", verticals: ["construction"] },
+  { key: "daily-log-rollup", title: "Daily Log Rollup", module: "dailylogs", verticals: ["construction"] },
+];
+// Derived lookup, kept so the rest of this file's REPORT_TITLES[type] calls
+// don't need to change.
+const REPORT_TITLES = Object.fromEntries(REPORT_REGISTRY.map((r) => [r.key, r.title]));
 
 async function buildReportData(type, projectId, { from, to } = {}) {
   if (type === "status-summary") return getStatusSummary(projectId);
@@ -316,6 +327,30 @@ async function buildReportData(type, projectId, { from, to } = {}) {
   if (type === "daily-log-rollup") return getDailyLogRollup(projectId, from, to);
   return null;
 }
+
+// ============================================================
+// GET /api/reports/types — which report types this org can see, filtered
+// by vertical and by which of those types' underlying modules are enabled.
+// Not yet wired into the frontend (ReportsTab.jsx still hardcodes its own
+// list, which happens to match exactly for every Construction org today —
+// see the Phase 1 note in the MangoDoe Enterprise design doc). Exists now
+// so a future vertical's report types are additive here, not a rewrite.
+// ============================================================
+router.get("/reports/types", requireAuth, requireModule("reports"), async (req, res) => {
+  try {
+    const orgRes = await pool.query("SELECT vertical FROM organizations WHERE id = $1", [req.user.orgId]);
+    const vertical = orgRes.rows[0] ? orgRes.rows[0].vertical : "construction";
+    const forVertical = REPORT_REGISTRY.filter((r) => r.verticals.includes(vertical));
+
+    const enabledModules = await getOrgModules(req.user.orgId);
+    const available = forVertical.filter((r) => enabledModules[r.module] !== false);
+
+    res.json({ types: available.map((r) => ({ key: r.key, title: r.title })) });
+  } catch (err) {
+    console.error("[radah-pm] list report types error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
 
 // ============================================================
 // ON-SCREEN ENDPOINTS

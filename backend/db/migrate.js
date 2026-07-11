@@ -54,6 +54,7 @@ async function migrate() {
     await runSqlFile("migrations_phase4_billing_pdf.sql", "Migration (billing PDF filing link)");
     await runSqlFile("migrations_phase4_folder_reorder.sql", "Migration (rename folder template for reorder)");
     await runSqlFile("migrations_phase4_folder_dedupe.sql", "Migration (dedupe folders + prevent recurrence)");
+    await runSqlFile("migrations_phase5_platform_core.sql", "Phase 5 migration (multi-vertical core: org vertical, folder templates, workflow statuses)");
   } finally {
     await pool.end();
   }

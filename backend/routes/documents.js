@@ -24,6 +24,7 @@ const pool = require("../db/pool");
 const { requireAuth, requireRole, isInternal } = require("../middleware/auth");
 const { userCanAccessProject, resourceProjectId } = require("./projects");
 const { requireModule } = require("../orgModules");
+const { resolveFolderTemplate, getOrgTemplateRow, upsertOrgTemplate, resetOrgTemplate } = require("../folderTemplates");
 const { notifyProject } = require("../notify");
 const r2 = require("../db/r2");
 
@@ -484,28 +485,17 @@ router.patch("/documents/:id", requireAuth, async (req, res) => {
 });
 
 // ============================================================
-// STANDARD FOLDER TEMPLATE (construction-industry structure)
+// STANDARD FOLDER TEMPLATE
 // POST /api/projects/:projectId/folders/apply-template  (admin/staff)
 // Idempotent: find-or-create by name at each level, so re-running won't
 // duplicate. Great for setting up a new project's filing structure at once.
+//
+// The template applied is resolved per-org (see folderTemplates.js): the
+// org's own customization if they have one, else the built-in default for
+// their vertical. Every existing (Construction) org resolves to exactly
+// the tree this endpoint always applied — this is a config change, not a
+// behavior change, unless an org actively customizes its template below.
 // ============================================================
-const FOLDER_TEMPLATE = [
-  { name: "00 - Project Management", children: ["Contacts & Directory", "Meeting Minutes", "Correspondence", "Schedules"] },
-  { name: "01 - Preconstruction & Contracts", children: ["Contracts & Agreements", "Bonds & Insurance", "Permits & Approvals", "Permit Log", "Proposals & Estimates"] },
-  { name: "02 - Subcontractors", children: ["Prequalification", "Subcontracts", "Certificates of Insurance", "W-9s & Compliance", "Scopes of Work", "Subcontractor Directory"] },
-  { name: "03 - Procurement", children: ["Procurement Log", "Long Lead Item Log", "Purchase Orders", "Vendor Quotes", "Material Deliveries"] },
-  { name: "04 - Drawings & Specifications", children: ["Contract Drawings (For Construction)", "Shop Drawings", "As-Builts", "Specifications", "Superseded"] },
-  { name: "05 - Submittals", children: [] },
-  { name: "06 - RFIs", children: [] },
-  { name: "07 - Change Management", children: ["Change Orders", "Potential Change Orders (PCOs)", "Construction Change Directives", "Change Log"] },
-  { name: "08 - Cost & Billing", children: ["Budget", "Pay Applications", "Invoices", "Lien Waivers"] },
-  { name: "09 - Field & Logs", children: ["Daily Logs", "Site Photos", "Delivery Logs", "Visitor Logs", "Equipment Logs", "Weather Logs"] },
-  { name: "10 - Safety", children: ["Safety Plans", "Incident Reports", "Toolbox Talks & JHAs", "Safety Inspections"] },
-  { name: "11 - Quality (QA-QC)", children: ["Inspection Reports", "Inspection Log", "Test Reports", "Punch Lists", "Punch List Log", "Deficiency Logs"] },
-  { name: "12 - Logs & Registers", children: ["Action Log", "Risk Register", "Issue Log", "Decision Log", "Assumption Log", "Constraint Log", "Opportunity Log", "Open Items Log", "Lessons Learned Log", "Stakeholder Log", "Meeting Log", "Correspondence Log"] },
-  { name: "13 - Closeout", children: ["Warranties", "Warranty Log", "Asset Log", "O&M Manuals", "As-Built Record Set", "Final Certificates & Permits", "Training"] },
-];
-
 router.post(
   "/projects/:projectId/folders/apply-template",
   requireAuth,
@@ -516,6 +506,7 @@ router.post(
     const projectId = req.params.projectId;
     const client = await pool.connect();
     try {
+      const { template } = await resolveFolderTemplate(req.user.orgId);
       await client.query("BEGIN");
       let created = 0;
       async function findOrCreate(name, parentId) {
@@ -545,9 +536,9 @@ router.post(
           throw err;
         }
       }
-      for (const top of FOLDER_TEMPLATE) {
+      for (const top of template) {
         const topId = await findOrCreate(top.name, null);
-        for (const child of top.children) await findOrCreate(child, topId);
+        for (const child of top.children || []) await findOrCreate(child, topId);
       }
       await client.query("COMMIT");
       res.json({ message: `Standard folder structure applied. ${created} new folder(s) created.`, created });
@@ -560,5 +551,48 @@ router.post(
     }
   }
 );
+
+// ============================================================
+// ORG FOLDER TEMPLATE CUSTOMIZATION (admin only)
+// GET    /api/org/folder-template          — this org's own customization, or null if using the vertical default
+// PUT    /api/org/folder-template           { name, template }
+// DELETE /api/org/folder-template           — revert to the vertical default
+// Always scoped to req.user.orgId — an admin can only edit their own org's
+// template, never another org's (no :orgId in the path, deliberately).
+// ============================================================
+router.get("/org/folder-template", requireAuth, requireRole("admin", "staff"), async (req, res) => {
+  try {
+    const own = await getOrgTemplateRow(req.user.orgId);
+    if (own) return res.json({ customized: true, name: own.name, template: own.template, updatedAt: own.updated_at });
+    const resolved = await resolveFolderTemplate(req.user.orgId);
+    res.json({ customized: false, name: resolved.name, template: resolved.template, updatedAt: null });
+  } catch (err) {
+    console.error("[radah-pm] get org folder template error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
+router.put("/org/folder-template", requireAuth, requireRole("admin"), async (req, res) => {
+  try {
+    const { name, template } = req.body || {};
+    const row = await upsertOrgTemplate(req.user.orgId, req.user.id, { name, template });
+    res.json({ customized: true, name: row.name, template: row.template, updatedAt: row.updated_at });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error("[radah-pm] update org folder template error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
+router.delete("/org/folder-template", requireAuth, requireRole("admin"), async (req, res) => {
+  try {
+    await resetOrgTemplate(req.user.orgId);
+    const resolved = await resolveFolderTemplate(req.user.orgId);
+    res.json({ customized: false, name: resolved.name, template: resolved.template, updatedAt: null });
+  } catch (err) {
+    console.error("[radah-pm] reset org folder template error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
 
 module.exports = router;
