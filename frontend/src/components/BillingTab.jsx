@@ -67,7 +67,7 @@ function Stat({ label, value, emphasize }) {
 
 // ---------- create modal ----------
 function NewPayAppModal({ onClose, onSaved, projectId }) {
-  const [form, setForm] = useState({ periodStart: "", periodEnd: "", retentionPercent: "10" });
+  const [form, setForm] = useState({ periodStart: "", periodEnd: "", retentionPercent: "10", importFromBudget: true });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -84,6 +84,7 @@ function NewPayAppModal({ onClose, onSaved, projectId }) {
         periodStart: form.periodStart || null,
         periodEnd: form.periodEnd || null,
         retentionPercent: retention,
+        importFromBudget: form.importFromBudget,
       });
       onSaved(payApp);
     } catch (err) {
@@ -115,9 +116,17 @@ function NewPayAppModal({ onClose, onSaved, projectId }) {
             <label style={labelStyle}>Retention (%)</label>
             <input value={form.retentionPercent} onChange={(e) => setForm((f) => ({ ...f, retentionPercent: e.target.value }))} style={inputStyle} placeholder="10" />
           </div>
-          <p className="text-sm text-steel" style={{ marginBottom: "1rem" }}>
-            This creates one line per current budget line, carrying forward completed amounts from the last approved or paid application.
-          </p>
+          <div style={{ marginBottom: "1.2rem" }}>
+            <label style={labelStyle}>Schedule of Values</label>
+            <label style={{ display: "flex", alignItems: "flex-start", gap: "0.5rem", marginBottom: "0.5rem", fontSize: "0.85rem", cursor: "pointer" }}>
+              <input type="radio" checked={form.importFromBudget === true} onChange={() => setForm((f) => ({ ...f, importFromBudget: true }))} style={{ marginTop: 3 }} />
+              <span>Auto-fill from the current budget — one line per budget line, carrying forward completed amounts from the last approved or paid application.</span>
+            </label>
+            <label style={{ display: "flex", alignItems: "flex-start", gap: "0.5rem", fontSize: "0.85rem", cursor: "pointer" }}>
+              <input type="radio" checked={form.importFromBudget === false} onChange={() => setForm((f) => ({ ...f, importFromBudget: false }))} style={{ marginTop: 3 }} />
+              <span>Start blank — build the schedule of values manually or import it from a CSV after creating this pay application.</span>
+            </label>
+          </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem" }}>
             <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
             <button className="btn btn-gold" disabled={saving}>{saving ? "Creating..." : "Create"}</button>
@@ -190,6 +199,193 @@ function LienWaiverModal({ projectId, payAppId, onClose, onSaved }) {
   );
 }
 
+// ---------- add SOV line manually ----------
+function AddLineItemModal({ payAppId, onClose, onSaved }) {
+  const [form, setForm] = useState({ description: "", scheduledValue: "" });
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setError("");
+    if (!form.description.trim()) return setError("A description is required.");
+    const cents = parseDollarsToCents(form.scheduledValue || "0");
+    if (Number.isNaN(cents)) return setError("Enter a valid scheduled value.");
+    setSaving(true);
+    try {
+      await api.post(`/billing/pay-apps/${payAppId}/items`, {
+        description: form.description.trim(),
+        scheduledValueCents: cents,
+      });
+      onSaved();
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3 style={{ fontSize: "1.1rem", textTransform: "uppercase" }}>Add SOV Line</h3>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+        {error && <div className="error-msg">{error}</div>}
+        <form onSubmit={submit}>
+          <div style={{ marginBottom: "1rem" }}>
+            <label style={labelStyle}>Description</label>
+            <input autoFocus value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} style={inputStyle} placeholder="e.g. Site Mobilization" />
+          </div>
+          <div style={{ marginBottom: "1.2rem" }}>
+            <label style={labelStyle}>Scheduled Value ($)</label>
+            <input value={form.scheduledValue} onChange={(e) => setForm((f) => ({ ...f, scheduledValue: e.target.value }))} style={inputStyle} placeholder="0.00" />
+          </div>
+          <p className="text-sm text-steel" style={{ marginBottom: "1rem" }}>
+            Not tied to a budget line — for a contract schedule of values that differs from the internal cost budget. If a prior certified pay app has a line with the same description, its completed-to-date amount carries forward automatically.
+          </p>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem" }}>
+            <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
+            <button className="btn btn-gold" disabled={saving}>{saving ? "Adding..." : "Add Line"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------- import schedule of values (CSV) ----------
+// Minimal client-side CSV parser: two columns, description then scheduled
+// value. Handles an optional header row, quoted fields with embedded
+// commas, and "$"/"," in the amount column.
+function parseSovCsv(text) {
+  const rows = [];
+  let cur = "";
+  let field = "";
+  let inQuotes = false;
+  const pushField = () => { cur += (cur ? "\u0001" : "") + field; field = ""; };
+  const pushRow = () => { pushField(); rows.push(cur.split("\u0001")); cur = ""; };
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') { inQuotes = false; }
+      else { field += c; }
+    } else if (c === '"') { inQuotes = true; }
+    else if (c === ",") { pushField(); }
+    else if (c === "\n") { pushRow(); }
+    else if (c === "\r") { /* skip */ }
+    else { field += c; }
+  }
+  if (field || cur) pushRow();
+
+  const cleanRows = rows
+    .map((r) => r.map((c) => (c || "").trim()))
+    .filter((r) => r.some((c) => c !== ""));
+  if (cleanRows.length === 0) return [];
+
+  // Drop a header row if the second column doesn't look like a number.
+  const looksNumeric = (s) => /^\$?-?[\d,]+(\.\d+)?$/.test(s.replace(/\s/g, ""));
+  const startIdx = cleanRows[0][1] && !looksNumeric(cleanRows[0][1]) ? 1 : 0;
+
+  return cleanRows.slice(startIdx).map((r) => ({
+    description: r[0] || "",
+    scheduledValueCents: parseDollarsToCents((r[1] || "0").replace(/[$,]/g, "")),
+  }));
+}
+
+function ImportSovModal({ payAppId, onClose, onSaved }) {
+  const [rows, setRows] = useState([]);
+  const [fileName, setFileName] = useState("");
+  const [mode, setMode] = useState("replace"); // "replace" | "append"
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  function onFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setError("");
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = parseSovCsv(String(reader.result || ""));
+        const bad = parsed.find((r) => !r.description || Number.isNaN(r.scheduledValueCents));
+        if (bad) {
+          setRows([]);
+          return setError(`Couldn't read that row: "${bad.description || "(blank)"}" — check for a description and a numeric value in every row.`);
+        }
+        setRows(parsed);
+      } catch {
+        setRows([]);
+        setError("Couldn't parse that file. Export it as CSV with two columns: Description, Scheduled Value.");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  async function submit() {
+    setError("");
+    if (rows.length === 0) return setError("Choose a CSV file with at least one row first.");
+    setSaving(true);
+    try {
+      await api.post(`/billing/pay-apps/${payAppId}/items/import`, { items: rows, mode });
+      onSaved();
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  }
+
+  const total = rows.reduce((s, r) => s + (r.scheduledValueCents || 0), 0);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+        <div className="modal-header">
+          <h3 style={{ fontSize: "1.1rem", textTransform: "uppercase" }}>Import Schedule of Values</h3>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+        {error && <div className="error-msg">{error}</div>}
+        <p className="text-sm text-steel" style={{ marginBottom: "1rem" }}>
+          CSV with two columns: Description, Scheduled Value. A header row is fine.
+        </p>
+        <div style={{ marginBottom: "1rem" }}>
+          <label style={labelStyle}>CSV File</label>
+          <input type="file" accept=".csv,text/csv" onChange={onFile} style={inputStyle} />
+          {fileName && <p className="text-sm text-steel" style={{ marginTop: "0.3rem" }}>{fileName}</p>}
+        </div>
+        <div style={{ marginBottom: "1rem" }}>
+          <label style={labelStyle}>Import Mode</label>
+          <select value={mode} onChange={(e) => setMode(e.target.value)} style={inputStyle}>
+            <option value="replace">Replace all existing lines</option>
+            <option value="append">Add to existing lines</option>
+          </select>
+        </div>
+        {rows.length > 0 && (
+          <div className="card" style={{ padding: 0, overflow: "hidden", marginBottom: "1.2rem", maxHeight: 220, overflowY: "auto" }}>
+            <table className="data-table">
+              <thead><tr><th>Description</th><th style={{ textAlign: "right" }}>Scheduled Value</th></tr></thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i}><td>{r.description}</td><td style={{ textAlign: "right" }}>{fmtMoney(r.scheduledValueCents)}</td></tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ fontWeight: 700 }}><td>{rows.length} line{rows.length === 1 ? "" : "s"}</td><td style={{ textAlign: "right" }}>{fmtMoney(total)}</td></tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem" }}>
+          <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
+          <button className="btn btn-gold" disabled={saving || rows.length === 0} onClick={submit}>{saving ? "Importing..." : "Import"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- pay app detail ----------
 function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChanged }) {
   const [payApp, setPayApp] = useState(null);
@@ -199,6 +395,8 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
   const [editingItems, setEditingItems] = useState({}); // id -> { thisPeriod, thisPeriodPercent, stored }
   const [thisPeriodMode, setThisPeriodMode] = useState("dollar"); // "dollar" | "percent"
   const [waiverModal, setWaiverModal] = useState(false);
+  const [addLineModal, setAddLineModal] = useState(false);
+  const [importModal, setImportModal] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const fileInputs = {};
 
@@ -212,6 +410,8 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
       for (const it of d.payApp.items) {
         const thisPeriod = centsToInput(it.thisPeriodCents);
         edits[it.id] = {
+          description: it.description,
+          scheduledValue: centsToInput(it.scheduledValueCents),
           thisPeriod,
           thisPeriodPercent: percentFromDollarInput(thisPeriod, it.scheduledValueCents),
           stored: centsToInput(it.materialsStoredCents),
@@ -231,10 +431,33 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
     const edit = editingItems[itemId];
     const thisPeriod = parseDollarsToCents(edit.thisPeriod || "0");
     const stored = parseDollarsToCents(edit.stored || "0");
-    if (Number.isNaN(thisPeriod) || Number.isNaN(stored)) return alert("Enter valid dollar amounts.");
+    const scheduledValueCents = parseDollarsToCents(edit.scheduledValue || "0");
+    const description = String(edit.description || "").trim();
+    if (Number.isNaN(thisPeriod) || Number.isNaN(stored) || Number.isNaN(scheduledValueCents)) {
+      return alert("Enter valid dollar amounts.");
+    }
+    if (!description) return alert("Description cannot be empty.");
     setBusy(true);
     try {
-      await api.patch(`/billing/pay-app-items/${itemId}`, { thisPeriodCents: thisPeriod, materialsStoredCents: stored });
+      await api.patch(`/billing/pay-app-items/${itemId}`, {
+        thisPeriodCents: thisPeriod,
+        materialsStoredCents: stored,
+        scheduledValueCents,
+        description,
+      });
+      await load();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteItem(itemId, description) {
+    if (!confirm(`Remove "${description}" from this pay application?`)) return;
+    setBusy(true);
+    try {
+      await api.delete(`/billing/pay-app-items/${itemId}`);
       await load();
     } catch (err) {
       alert(err.message);
@@ -448,15 +671,48 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
           </thead>
           <tbody>
             {payApp.items.map((it) => {
-              const edit = editingItems[it.id] || { thisPeriod: "0.00", thisPeriodPercent: "0.00", stored: "0.00" };
+              const edit = editingItems[it.id] || { description: it.description, scheduledValue: "0.00", thisPeriod: "0.00", thisPeriodPercent: "0.00", stored: "0.00" };
+              // Use the live (possibly unsaved) edited Scheduled Value for This-Period
+              // percent math, so editing SOV value and This Period % stay in sync
+              // before the row is saved.
+              const liveScheduledCents = (() => {
+                const c = parseDollarsToCents(edit.scheduledValue);
+                return Number.isNaN(c) ? it.scheduledValueCents : c;
+              })();
               return (
                 <tr key={it.id}>
-                  <td>{it.description}</td>
-                  <td style={{ textAlign: "right" }}>{fmtMoney(it.scheduledValueCents)}</td>
+                  <td>
+                    {isDraft && canManage ? (
+                      <input
+                        value={edit.description}
+                        onChange={(e) => setEditingItems((p) => ({ ...p, [it.id]: { ...p[it.id], description: e.target.value } }))}
+                        style={{ width: "100%", minWidth: 160, border: "1px solid var(--line)", borderRadius: 4, padding: "0.3rem 0.5rem", fontSize: "0.82rem" }}
+                      />
+                    ) : it.description}
+                  </td>
+                  <td style={{ textAlign: "right" }}>
+                    {isDraft && canManage ? (
+                      <input
+                        value={edit.scheduledValue}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setEditingItems((p) => {
+                            const cents = parseDollarsToCents(v);
+                            const liveCents = Number.isNaN(cents) ? 0 : cents;
+                            return {
+                              ...p,
+                              [it.id]: { ...p[it.id], scheduledValue: v, thisPeriodPercent: percentFromDollarInput(p[it.id]?.thisPeriod || "0", liveCents) },
+                            };
+                          });
+                        }}
+                        style={{ width: 100, textAlign: "right", border: "1px solid var(--line)", borderRadius: 4, padding: "0.3rem 0.5rem", fontSize: "0.82rem" }}
+                      />
+                    ) : fmtMoney(it.scheduledValueCents)}
+                  </td>
                   <td style={{ textAlign: "right" }}>{fmtMoney(it.previousCompletedCents)}</td>
                   <td style={{ textAlign: "right" }}>
                     {isDraft && canManage ? (
-                      thisPeriodMode === "percent" && it.scheduledValueCents > 0 ? (
+                      thisPeriodMode === "percent" && liveScheduledCents > 0 ? (
                         <div>
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
                             <input
@@ -465,7 +721,7 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
                                 const v = e.target.value;
                                 setEditingItems((p) => ({
                                   ...p,
-                                  [it.id]: { ...p[it.id], thisPeriodPercent: v, thisPeriod: dollarInputFromPercent(v, it.scheduledValueCents) },
+                                  [it.id]: { ...p[it.id], thisPeriodPercent: v, thisPeriod: dollarInputFromPercent(v, liveScheduledCents) },
                                 }));
                               }}
                               style={{ width: 60, textAlign: "right", border: "1px solid var(--line)", borderRadius: 4, padding: "0.3rem 0.5rem", fontSize: "0.82rem" }}
@@ -483,7 +739,7 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
                             const v = e.target.value;
                             setEditingItems((p) => ({
                               ...p,
-                              [it.id]: { ...p[it.id], thisPeriod: v, thisPeriodPercent: percentFromDollarInput(v, it.scheduledValueCents) },
+                              [it.id]: { ...p[it.id], thisPeriod: v, thisPeriodPercent: percentFromDollarInput(v, liveScheduledCents) },
                             }));
                           }}
                           style={{ width: 100, textAlign: "right", border: "1px solid var(--line)", borderRadius: 4, padding: "0.3rem 0.5rem", fontSize: "0.82rem" }}
@@ -503,7 +759,12 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
                   <td style={{ textAlign: "right", fontWeight: 600 }}>{fmtMoney(it.totalCompletedAndStoredCents)}</td>
                   <td style={{ textAlign: "right" }}>{it.percentComplete}%</td>
                   {isDraft && canManage && (
-                    <td><button className="btn btn-outline btn-sm" disabled={busy} onClick={() => saveItem(it.id)}>Save</button></td>
+                    <td>
+                      <div style={{ display: "flex", gap: "0.4rem" }}>
+                        <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => saveItem(it.id)}>Save</button>
+                        <button className="btn btn-danger btn-sm" disabled={busy} onClick={() => deleteItem(it.id, it.description)}>Remove</button>
+                      </div>
+                    </td>
                   )}
                 </tr>
               );
@@ -511,6 +772,13 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
           </tbody>
         </table>
       </div>
+
+      {isDraft && canManage && (
+        <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1.2rem" }}>
+          <button className="btn btn-outline btn-sm" onClick={() => setAddLineModal(true)}>+ Add Line</button>
+          <button className="btn btn-outline btn-sm" onClick={() => setImportModal(true)}>Import Schedule of Values</button>
+        </div>
+      )}
 
       <div className="card">
         <div className="flex-between" style={{ marginBottom: "0.8rem" }}>
@@ -564,6 +832,22 @@ function PayAppDetail({ projectId, payAppId, canManage, isClient, onBack, onChan
           payAppId={payAppId}
           onClose={() => setWaiverModal(false)}
           onSaved={() => { setWaiverModal(false); load(); }}
+        />
+      )}
+
+      {addLineModal && (
+        <AddLineItemModal
+          payAppId={payAppId}
+          onClose={() => setAddLineModal(false)}
+          onSaved={() => { setAddLineModal(false); load(); }}
+        />
+      )}
+
+      {importModal && (
+        <ImportSovModal
+          payAppId={payAppId}
+          onClose={() => setImportModal(false)}
+          onSaved={() => { setImportModal(false); load(); }}
         />
       )}
     </div>

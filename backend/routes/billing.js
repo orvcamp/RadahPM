@@ -315,17 +315,50 @@ router.get("/billing/pay-apps/:id", requireAuth, requireModule("billing"), guard
 // Seeds one item per current budget line, carrying forward completed
 // amounts from the most recent approved/paid pay app.
 // ============================================================
+// Carry-forward lookup: sums a prior APPROVED/PAID app's certified totals
+// per line, keyed two ways — by budget_line_id (reliable, used for items
+// generated from the budget) and by normalized description (best-effort,
+// used for manually-added or imported SOV lines that have no budget_line_id
+// to match on). Shared by pay-app creation, manual item add, and SOV import.
+async function buildCarryForwardMaps(client, projectId, beforeApplicationNumber) {
+  const byLine = {};
+  const byDescription = {};
+  const prevRes = await client.query(
+    `SELECT id FROM pay_applications
+      WHERE project_id = $1 AND application_number < $2 AND status IN ('approved','paid') AND deleted_at IS NULL
+      ORDER BY application_number DESC LIMIT 1`,
+    [projectId, beforeApplicationNumber]
+  );
+  if (prevRes.rows[0]) {
+    const prevItemsRes = await client.query(
+      "SELECT * FROM pay_application_items WHERE pay_application_id = $1",
+      [prevRes.rows[0].id]
+    );
+    for (const it of prevItemsRes.rows) {
+      const total = centsOf(it.previous_completed_cents) + centsOf(it.this_period_cents) + centsOf(it.materials_stored_cents);
+      if (it.budget_line_id) byLine[it.budget_line_id] = total;
+      const key = (it.description || "").trim().toLowerCase();
+      if (key) byDescription[key] = total;
+    }
+  }
+  return { byLine, byDescription };
+}
+
 router.post(
   "/projects/:projectId/billing/pay-apps",
   requireAuth,
   requireRole("admin", "staff"),
   guardProject,
   async (req, res) => {
-    const { periodStart, periodEnd, retentionPercent } = req.body || {};
+    const { periodStart, periodEnd, retentionPercent, importFromBudget } = req.body || {};
     const retention = normalizePercent(retentionPercent, 10.0);
     if (retention === null) {
       return res.status(400).json({ error: "Retention percent must be between 0 and 100." });
     }
+    // Default true, so existing behavior (auto-populate from the budget) is
+    // unchanged unless the caller explicitly asks to start with a blank SOV
+    // (to build it manually and/or import one).
+    const shouldImportBudget = importFromBudget !== false;
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -345,49 +378,35 @@ router.post(
       );
       const payApp = ins.rows[0];
 
-      // Lines to bill: current budget lines for this project.
-      const linesRes = await client.query(
-        "SELECT * FROM budget_lines WHERE project_id = $1 ORDER BY sort_order ASC, created_at ASC",
-        [req.params.projectId]
-      );
-
-      // Prior certified app (approved/paid) to carry forward from, if any.
-      const prevRes = await client.query(
-        `SELECT id FROM pay_applications
-          WHERE project_id = $1 AND application_number < $2 AND status IN ('approved','paid') AND deleted_at IS NULL
-          ORDER BY application_number DESC LIMIT 1`,
-        [req.params.projectId, applicationNumber]
-      );
-      let prevByLine = {};
-      if (prevRes.rows[0]) {
-        const prevItemsRes = await client.query(
-          "SELECT * FROM pay_application_items WHERE pay_application_id = $1",
-          [prevRes.rows[0].id]
+      if (shouldImportBudget) {
+        // Lines to bill: current budget lines for this project.
+        const linesRes = await client.query(
+          "SELECT * FROM budget_lines WHERE project_id = $1 ORDER BY sort_order ASC, created_at ASC",
+          [req.params.projectId]
         );
-        for (const it of prevItemsRes.rows) {
-          if (it.budget_line_id) {
-            prevByLine[it.budget_line_id] =
-              centsOf(it.previous_completed_cents) + centsOf(it.this_period_cents) + centsOf(it.materials_stored_cents);
-          }
+
+        const { byLine } = await buildCarryForwardMaps(client, req.params.projectId, applicationNumber);
+
+        let sortOrder = 0;
+        for (const line of linesRes.rows) {
+          await client.query(
+            `INSERT INTO pay_application_items
+               (pay_application_id, budget_line_id, description, scheduled_value_cents, previous_completed_cents, sort_order)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [
+              payApp.id,
+              line.id,
+              line.description,
+              centsOf(line.budgeted_amount_cents),
+              byLine[line.id] || 0,
+              sortOrder++,
+            ]
+          );
         }
       }
-
-      let sortOrder = 0;
-      for (const line of linesRes.rows) {
-        await client.query(
-          `INSERT INTO pay_application_items
-             (pay_application_id, budget_line_id, description, scheduled_value_cents, previous_completed_cents, sort_order)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [
-            payApp.id,
-            line.id,
-            line.description,
-            centsOf(line.budgeted_amount_cents),
-            prevByLine[line.id] || 0,
-            sortOrder++,
-          ]
-        );
-      }
+      // else: pay app is created with zero items — add lines manually via
+      // POST /billing/pay-apps/:id/items or import a schedule of values via
+      // POST /billing/pay-apps/:id/items/import.
 
       await client.query("COMMIT");
       const full = await fetchFullPayApp(payApp.id);
@@ -451,7 +470,10 @@ router.patch(
 // ============================================================
 // EDIT LINE ITEM (admin/staff only, parent must be draft)
 // PATCH /api/billing/pay-app-items/:id
-// Body: { thisPeriodCents, materialsStoredCents }
+// Body: { thisPeriodCents, materialsStoredCents, description, scheduledValueCents }
+// description/scheduledValueCents are only meaningful for manually-added or
+// imported SOV lines — items generated from the budget can still have these
+// edited too, but note the value will then diverge from the budget line.
 // ============================================================
 router.patch(
   "/billing/pay-app-items/:id",
@@ -476,6 +498,16 @@ router.patch(
       if (cents === null) return res.status(400).json({ error: "Materials stored amount must be a whole number of cents, 0 or more." });
       updates.push(`materials_stored_cents = $${i}`); values.push(cents); i++;
     }
+    if (req.body.description !== undefined) {
+      const desc = String(req.body.description || "").trim();
+      if (!desc) return res.status(400).json({ error: "Description cannot be empty." });
+      updates.push(`description = $${i}`); values.push(desc); i++;
+    }
+    if (req.body.scheduledValueCents !== undefined) {
+      const cents = normalizeCents(req.body.scheduledValueCents);
+      if (cents === null) return res.status(400).json({ error: "Scheduled value must be a whole number of cents, 0 or more." });
+      updates.push(`scheduled_value_cents = $${i}`); values.push(cents); i++;
+    }
     if (updates.length === 0) return res.status(400).json({ error: "No valid fields provided to update." });
 
     try {
@@ -486,6 +518,167 @@ router.patch(
     } catch (err) {
       console.error("[radah-pm] update pay app item error:", err);
       res.status(500).json({ error: "Something went wrong." });
+    }
+  }
+);
+
+// ============================================================
+// ADD A LINE ITEM MANUALLY (admin/staff only, parent must be draft)
+// POST /api/billing/pay-apps/:id/items
+// Body: { description, scheduledValueCents }
+// Not tied to a budget_line — for a schedule of values that differs from
+// the internal cost budget (e.g. a contract SOV with different breakdown).
+// Carries forward previousCompletedCents from the prior certified app by
+// matching description, same as an imported line.
+// ============================================================
+router.post(
+  "/billing/pay-apps/:id/items",
+  requireAuth,
+  requireRole("admin", "staff"),
+  guardPayApp,
+  async (req, res) => {
+    try {
+      const appRes = await pool.query("SELECT * FROM pay_applications WHERE id = $1 AND deleted_at IS NULL", [req.params.id]);
+      const payApp = appRes.rows[0];
+      if (!payApp) return res.status(404).json({ error: "Pay application not found." });
+      if (payApp.status !== "draft") {
+        return res.status(409).json({ error: "Only a draft pay application can have items added." });
+      }
+      const description = String((req.body || {}).description || "").trim();
+      if (!description) return res.status(400).json({ error: "Description is required." });
+      const scheduledValueCents = normalizeCents((req.body || {}).scheduledValueCents);
+      if (scheduledValueCents === null) {
+        return res.status(400).json({ error: "Scheduled value must be a whole number of cents, 0 or more." });
+      }
+
+      const sortRes = await pool.query(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM pay_application_items WHERE pay_application_id = $1",
+        [req.params.id]
+      );
+      const { byDescription } = await buildCarryForwardMaps(pool, payApp.project_id, payApp.application_number);
+      const previousCompletedCents = byDescription[description.toLowerCase()] || 0;
+
+      await pool.query(
+        `INSERT INTO pay_application_items
+           (pay_application_id, budget_line_id, description, scheduled_value_cents, previous_completed_cents, sort_order)
+         VALUES ($1, NULL, $2, $3, $4, $5)`,
+        [req.params.id, description, scheduledValueCents, previousCompletedCents, sortRes.rows[0].next]
+      );
+      const full = await fetchFullPayApp(req.params.id);
+      res.status(201).json({ payApp: full });
+    } catch (err) {
+      console.error("[radah-pm] add pay app item error:", err);
+      res.status(500).json({ error: "Something went wrong." });
+    }
+  }
+);
+
+// ============================================================
+// DELETE A LINE ITEM (admin/staff only, parent must be draft)
+// DELETE /api/billing/pay-app-items/:id
+// ============================================================
+router.delete(
+  "/billing/pay-app-items/:id",
+  requireAuth,
+  requireRole("admin", "staff"),
+  guardItem,
+  async (req, res) => {
+    if (req.parentStatus !== "draft") {
+      return res.status(409).json({ error: "Only items on a draft pay application can be removed." });
+    }
+    try {
+      await pool.query("DELETE FROM pay_application_items WHERE id = $1", [req.params.id]);
+      const full = await fetchFullPayApp(req.parentPayAppId);
+      res.json({ payApp: full });
+    } catch (err) {
+      console.error("[radah-pm] delete pay app item error:", err);
+      res.status(500).json({ error: "Something went wrong." });
+    }
+  }
+);
+
+// ============================================================
+// IMPORT A SCHEDULE OF VALUES (admin/staff only, parent must be draft)
+// POST /api/billing/pay-apps/:id/items/import
+// Body: { items: [{ description, scheduledValueCents }], mode: "replace" | "append" }
+// "replace" clears all existing items on this draft app first (useful when
+// starting a pay app blank and importing the real contract SOV in one go).
+// "append" adds after whatever's already there.
+// Parsing of an uploaded CSV/XLSX happens client-side; this endpoint just
+// takes the resulting structured rows.
+// ============================================================
+router.post(
+  "/billing/pay-apps/:id/items/import",
+  requireAuth,
+  requireRole("admin", "staff"),
+  guardPayApp,
+  async (req, res) => {
+    const { items, mode } = req.body || {};
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: "Provide at least one item to import." });
+    }
+    if (items.length > 500) {
+      return res.status(400).json({ error: "Too many items in one import (max 500)." });
+    }
+    if (mode !== "replace" && mode !== "append") {
+      return res.status(400).json({ error: "mode must be 'replace' or 'append'." });
+    }
+    // Validate every row up front so a bad row doesn't partially import.
+    const cleanRows = [];
+    for (const [idx, raw] of items.entries()) {
+      const description = String((raw && raw.description) || "").trim();
+      if (!description) return res.status(400).json({ error: `Row ${idx + 1}: description is required.` });
+      const scheduledValueCents = normalizeCents(raw && raw.scheduledValueCents);
+      if (scheduledValueCents === null) {
+        return res.status(400).json({ error: `Row ${idx + 1}: scheduled value must be a whole number of cents, 0 or more.` });
+      }
+      cleanRows.push({ description, scheduledValueCents });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const appRes = await client.query(
+        "SELECT * FROM pay_applications WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+        [req.params.id]
+      );
+      const payApp = appRes.rows[0];
+      if (!payApp) { await client.query("ROLLBACK"); return res.status(404).json({ error: "Pay application not found." }); }
+      if (payApp.status !== "draft") {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ error: "Only a draft pay application can be imported into." });
+      }
+
+      if (mode === "replace") {
+        await client.query("DELETE FROM pay_application_items WHERE pay_application_id = $1", [req.params.id]);
+      }
+      const sortRes = await client.query(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM pay_application_items WHERE pay_application_id = $1",
+        [req.params.id]
+      );
+      let sortOrder = sortRes.rows[0].next;
+
+      const { byDescription } = await buildCarryForwardMaps(client, payApp.project_id, payApp.application_number);
+
+      for (const row of cleanRows) {
+        const previousCompletedCents = byDescription[row.description.toLowerCase()] || 0;
+        await client.query(
+          `INSERT INTO pay_application_items
+             (pay_application_id, budget_line_id, description, scheduled_value_cents, previous_completed_cents, sort_order)
+           VALUES ($1, NULL, $2, $3, $4, $5)`,
+          [req.params.id, row.description, row.scheduledValueCents, previousCompletedCents, sortOrder++]
+        );
+      }
+
+      await client.query("COMMIT");
+      const full = await fetchFullPayApp(req.params.id);
+      res.status(201).json({ payApp: full, imported: cleanRows.length, mode });
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("[radah-pm] import pay app items error:", err);
+      res.status(500).json({ error: "Something went wrong importing the schedule of values." });
+    } finally {
+      client.release();
     }
   }
 );
