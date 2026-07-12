@@ -11,11 +11,20 @@ const ROLE_LABELS = {
   client: "Client / Owner",
   trade_partner: "Trade Partner",
 };
+// Same 4-tier role shape, relabeled per vertical (design doc Section 2) —
+// the stored role value never changes, just what it's called on screen.
+const ROLE_LABELS_FACILITIES = {
+  admin: "Administrator",
+  staff: "Facilities Staff",
+  client: "Tenant",
+  trade_partner: "Vendor",
+};
 
 export default function DashboardLayout() {
   const { user, logout } = useAuth();
   const isInternal = user.role === "admin" || user.role === "staff";
   const isPlatformAdmin = !!user.isPlatformAdmin;
+  const isFacilities = user.orgVertical === "facilities";
 
   return (
     <div className="app-shell">
@@ -35,9 +44,20 @@ export default function DashboardLayout() {
           <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : "")}>
             Dashboard
           </NavLink>
-          <NavLink to="/projects" className={({ isActive }) => (isActive ? "active" : "")}>
-            Projects
-          </NavLink>
+          {isFacilities ? (
+            <>
+              <NavLink to="/properties" className={({ isActive }) => (isActive ? "active" : "")}>
+                Properties
+              </NavLink>
+              <NavLink to="/vendors" className={({ isActive }) => (isActive ? "active" : "")}>
+                Vendors
+              </NavLink>
+            </>
+          ) : (
+            <NavLink to="/projects" className={({ isActive }) => (isActive ? "active" : "")}>
+              Projects
+            </NavLink>
+          )}
           {isInternal && (
             <NavLink to="/users" className={({ isActive }) => (isActive ? "active" : "")}>
               Users
@@ -55,7 +75,7 @@ export default function DashboardLayout() {
 
         <div className="sidebar-footer">
           <div className="sidebar-user">{user.fullName}</div>
-          <div className="sidebar-role">{ROLE_LABELS[user.role] || user.role}</div>
+          <div className="sidebar-role">{(isFacilities ? ROLE_LABELS_FACILITIES : ROLE_LABELS)[user.role] || user.role}</div>
           <button className="logout-btn" onClick={logout}>Log Out</button>
         </div>
       </aside>

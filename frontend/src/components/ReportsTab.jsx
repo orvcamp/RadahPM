@@ -8,7 +8,11 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "../api/client";
 
-const REPORT_TYPES = [
+// Fallback used until /reports/types responds (or if that fetch fails) —
+// matches the 5 Construction report types exactly, so this is a no-op for
+// every Construction org. A Facilities org gets its real (currently
+// smaller) list once the fetch below resolves.
+const FALLBACK_REPORT_TYPES = [
   { key: "status-summary", label: "Status Summary" },
   { key: "budget-vs-actual", label: "Budget vs. Actual" },
   { key: "rfi-log", label: "RFI Log" },
@@ -352,6 +356,7 @@ function EmailReportModal({ projectId, reportType, reportLabel, from, to, onClos
 
 export default function ReportsTab({ projectId }) {
   const [reportType, setReportType] = useState("status-summary");
+  const [availableTypes, setAvailableTypes] = useState(FALLBACK_REPORT_TYPES);
   const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -359,6 +364,28 @@ export default function ReportsTab({ projectId }) {
   const [emailOpen, setEmailOpen] = useState(false);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+
+  // Which report types this org actually has (vertical + enabled modules).
+  // Falls back to the Construction list on failure, so nothing regresses
+  // if this endpoint is ever unreachable.
+  useEffect(() => {
+    api.get("/reports/types")
+      .then((d) => {
+        if (Array.isArray(d.types) && d.types.length > 0) {
+          setAvailableTypes(d.types.map((t) => ({ key: t.key, label: t.title })));
+        }
+      })
+      .catch(() => { /* keep fallback list */ });
+  }, []);
+
+  // If the current selection isn't in this org's actual list (e.g. a
+  // Facilities property landing on "rfi-log" before the fetch above
+  // resolves), switch to the first real option once we know it.
+  useEffect(() => {
+    if (availableTypes.length > 0 && !availableTypes.some((t) => t.key === reportType)) {
+      setReportType(availableTypes[0].key);
+    }
+  }, [availableTypes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -418,7 +445,7 @@ export default function ReportsTab({ projectId }) {
     <div>
       <div className="flex-between" style={{ marginBottom: "1rem", flexWrap: "wrap", gap: "0.6rem" }}>
         <div className="tab-row" style={{ marginBottom: 0, borderBottom: "none" }}>
-          {REPORT_TYPES.map((rt) => (
+          {availableTypes.map((rt) => (
             <button
               key={rt.key}
               className={`tab-btn ${reportType === rt.key ? "active" : ""}`}
@@ -460,7 +487,7 @@ export default function ReportsTab({ projectId }) {
         <EmailReportModal
           projectId={projectId}
           reportType={reportType}
-          reportLabel={REPORT_TYPES.find((rt) => rt.key === reportType)?.label || "Report"}
+          reportLabel={availableTypes.find((rt) => rt.key === reportType)?.label || "Report"}
           from={from}
           to={to}
           onClose={() => setEmailOpen(false)}

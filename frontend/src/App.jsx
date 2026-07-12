@@ -11,6 +11,9 @@ import DashboardLayout from "./components/DashboardLayout.jsx";
 import DashboardPage from "./pages/DashboardPage.jsx";
 import ProjectsPage from "./pages/ProjectsPage.jsx";
 import ProjectDetailPage from "./pages/ProjectDetailPage.jsx";
+import PropertiesPage from "./pages/PropertiesPage.jsx";
+import PropertyDetailPage from "./pages/PropertyDetailPage.jsx";
+import VendorsPage from "./pages/VendorsPage.jsx";
 import UsersPage from "./pages/UsersPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
 import PlatformAdminPage from "./pages/PlatformAdminPage.jsx";
@@ -56,6 +59,9 @@ export default function App() {
         <Route index element={<DashboardPage />} />
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="projects/:id" element={<ProjectDetailPage />} />
+        <Route path="properties" element={<PropertiesPage />} />
+        <Route path="properties/:id" element={<PropertyDetailPage />} />
+        <Route path="vendors" element={<VendorsPage />} />
         <Route
           path="users"
           element={
