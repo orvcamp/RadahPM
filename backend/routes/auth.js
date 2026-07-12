@@ -42,6 +42,7 @@ function publicUser(user) {
     companyName: user.company_name,
     phone: user.phone,
     orgId: user.org_id,
+    orgVertical: user.org_vertical || "construction",
     isPlatformAdmin: user.is_platform_admin === true,
   };
 }
@@ -58,7 +59,9 @@ router.post("/login", loginLimiter, async (req, res) => {
 
   try {
     const result = await pool.query(
-      "SELECT * FROM users WHERE email = $1 AND is_active = TRUE",
+      `SELECT u.*, o.vertical AS org_vertical FROM users u
+       LEFT JOIN organizations o ON o.id = u.org_id
+       WHERE u.email = $1 AND u.is_active = TRUE`,
       [email.toLowerCase().trim()]
     );
     const user = result.rows[0];
@@ -102,7 +105,12 @@ router.post("/register", async (req, res) => {
  */
 router.get("/me", requireAuth, async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM users WHERE id = $1", [req.user.id]);
+    const result = await pool.query(
+      `SELECT u.*, o.vertical AS org_vertical FROM users u
+       LEFT JOIN organizations o ON o.id = u.org_id
+       WHERE u.id = $1`,
+      [req.user.id]
+    );
     const user = result.rows[0];
     if (!user) {
       return res.status(404).json({ error: "User not found." });
