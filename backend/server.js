@@ -25,6 +25,10 @@ const notificationRoutes = require("./routes/notifications");
 const logRoutes = require("./routes/logs");
 const reportRoutes = require("./routes/reports");
 const billingRoutes = require("./routes/billing");
+const propertyRoutes = require("./routes/properties"); // MangoDoe Facilities: Properties & Assets
+const workOrderRoutes = require("./routes/workorders"); // MangoDoe Facilities: Work Orders & PM Schedules
+const vendorRoutes = require("./routes/vendors"); // MangoDoe Facilities: Vendors & Contracts
+const inspectionRoutes = require("./routes/inspections"); // MangoDoe Facilities: Inspections & Compliance
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -76,6 +80,10 @@ app.use("/api", notificationRoutes); // In-app notifications
 app.use("/api", logRoutes); // Project logs & registers
 app.use("/api", reportRoutes); // Reports (status summary, budget vs actual, RFI/submittal logs, daily log rollup)
 app.use("/api", billingRoutes); // Billing (pay applications, lien waivers)
+app.use("/api", propertyRoutes); // Facilities: Properties (/api/properties) & Assets
+app.use("/api", workOrderRoutes); // Facilities: Work Orders & PM Schedules
+app.use("/api", vendorRoutes); // Facilities: Vendors (/api/vendors) & Vendor Contracts
+app.use("/api", inspectionRoutes); // Facilities: Inspections & Compliance
 
 // 404 handler
 app.use((req, res) => {

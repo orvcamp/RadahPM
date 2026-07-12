@@ -19,15 +19,28 @@ const pool = require("./db/pool");
 // The toggleable capability modules (core PM — projects/tasks/phases/team —
 // is always on and not listed here).
 const MODULES = [
-  { key: "documents", label: "Documents", verticals: ["construction"] },
-  { key: "budget", label: "Budget & Cost", verticals: ["construction"] },
+  // Shared engines — apply to more than one vertical now that Facilities
+  // (Phase 6) actually exists. Billing/Change Orders/RFIs/Submittals/Daily
+  // Logs stay construction-only for now: Facilities' "Capital Projects"
+  // module (design doc Section 2, module 08) deliberately reuses those
+  // outright rather than needing its own tag — that's an explicit reuse
+  // decision for later, not an automatic one.
+  { key: "documents", label: "Documents", verticals: ["construction", "facilities"] },
+  { key: "budget", label: "Budget & Cost", verticals: ["construction", "facilities"] },
+  { key: "reports", label: "Reports", verticals: ["construction", "facilities"] },
+  // Construction-only
   { key: "changeorders", label: "Change Orders", verticals: ["construction"] },
   { key: "dailylogs", label: "Daily Logs", verticals: ["construction"] },
   { key: "rfis", label: "RFIs", verticals: ["construction"] },
   { key: "submittals", label: "Submittals", verticals: ["construction"] },
   { key: "logs", label: "Logs & Registers", verticals: ["construction"] },
-  { key: "reports", label: "Reports", verticals: ["construction"] },
   { key: "billing", label: "Billing", verticals: ["construction"] },
+  // Facilities-only (Phase 6)
+  { key: "assets", label: "Assets", verticals: ["facilities"] },
+  { key: "workorders", label: "Work Orders", verticals: ["facilities"] },
+  { key: "pm_scheduling", label: "Preventive Maintenance", verticals: ["facilities"] },
+  { key: "vendors", label: "Vendors & Contracts", verticals: ["facilities"] },
+  { key: "inspections", label: "Inspections & Compliance", verticals: ["facilities"] },
 ];
 const MODULE_KEYS = MODULES.map((m) => m.key);
 
