@@ -15,7 +15,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 
 const VERTICALS = [
   { key: "construction", label: "Construction" },
-  { key: "projects", label: "Projects", disabled: true },
+  { key: "projects", label: "Projects" },
   { key: "facilities", label: "Facilities" },
 ];
 const VERTICAL_LABEL = Object.fromEntries(VERTICALS.map((v) => [v.key, v.label]));
