@@ -140,25 +140,17 @@ async function getBudgetVsActual(projectId) {
 }
 
 async function getStatusSummary(projectId) {
-  const [taskRes, coRes, rfiRes, subRes, logRes, budget] = await Promise.all([
-    pool.query("SELECT status FROM tasks WHERE project_id = $1", [projectId]),
-    pool.query(
-      "SELECT status, cost_impact_cents FROM change_orders WHERE project_id = $1 AND deleted_at IS NULL",
-      [projectId]
-    ),
-    pool.query("SELECT status FROM rfis WHERE project_id = $1 AND deleted_at IS NULL", [projectId]),
-    pool.query("SELECT status FROM submittals WHERE project_id = $1 AND deleted_at IS NULL", [projectId]),
-    pool.query(
-      "SELECT log_date FROM daily_logs WHERE project_id = $1 AND deleted_at IS NULL ORDER BY log_date DESC LIMIT 1",
-      [projectId]
-    ),
-    getBudgetVsActual(projectId),
-  ]);
-  const logCountRes = await pool.query(
-    "SELECT COUNT(*)::int AS n FROM daily_logs WHERE project_id = $1 AND deleted_at IS NULL",
+  const verticalRes = await pool.query(
+    "SELECT o.vertical FROM projects p JOIN organizations o ON o.id = p.org_id WHERE p.id = $1",
     [projectId]
   );
+  const vertical = verticalRes.rows[0] ? verticalRes.rows[0].vertical || "construction" : "construction";
 
+  // Tasks and Budget are shared across every vertical — always computed.
+  const [taskRes, budget] = await Promise.all([
+    pool.query("SELECT status FROM tasks WHERE project_id = $1", [projectId]),
+    getBudgetVsActual(projectId),
+  ]);
   const tasks = { total: taskRes.rows.length, notStarted: 0, inProgress: 0, blocked: 0, completed: 0 };
   for (const t of taskRes.rows) {
     if (t.status === "not_started") tasks.notStarted++;
@@ -166,38 +158,93 @@ async function getStatusSummary(projectId) {
     else if (t.status === "blocked") tasks.blocked++;
     else if (t.status === "completed") tasks.completed++;
   }
+  const result = { tasks, budget: { totals: budget.totals } };
 
-  const changeOrders = { draft: 0, submitted: 0, approved: 0, rejected: 0, netApprovedCostImpactCents: 0 };
-  for (const co of coRes.rows) {
-    if (co.status === "draft") changeOrders.draft++;
-    else if (co.status === "submitted") changeOrders.submitted++;
-    else if (co.status === "approved") { changeOrders.approved++; changeOrders.netApprovedCostImpactCents += centsOf(co.cost_impact_cents); }
-    else if (co.status === "rejected") changeOrders.rejected++;
+  if (vertical === "construction") {
+    const [coRes, rfiRes, subRes, logRes, logCountRes] = await Promise.all([
+      pool.query("SELECT status, cost_impact_cents FROM change_orders WHERE project_id = $1 AND deleted_at IS NULL", [projectId]),
+      pool.query("SELECT status FROM rfis WHERE project_id = $1 AND deleted_at IS NULL", [projectId]),
+      pool.query("SELECT status FROM submittals WHERE project_id = $1 AND deleted_at IS NULL", [projectId]),
+      pool.query("SELECT log_date FROM daily_logs WHERE project_id = $1 AND deleted_at IS NULL ORDER BY log_date DESC LIMIT 1", [projectId]),
+      pool.query("SELECT COUNT(*)::int AS n FROM daily_logs WHERE project_id = $1 AND deleted_at IS NULL", [projectId]),
+    ]);
+
+    const changeOrders = { draft: 0, submitted: 0, approved: 0, rejected: 0, netApprovedCostImpactCents: 0 };
+    for (const co of coRes.rows) {
+      if (co.status === "draft") changeOrders.draft++;
+      else if (co.status === "submitted") changeOrders.submitted++;
+      else if (co.status === "approved") { changeOrders.approved++; changeOrders.netApprovedCostImpactCents += centsOf(co.cost_impact_cents); }
+      else if (co.status === "rejected") changeOrders.rejected++;
+    }
+
+    const rfis = { open: 0, answered: 0, closed: 0, total: rfiRes.rows.length };
+    for (const r of rfiRes.rows) {
+      if (r.status === "open") rfis.open++;
+      else if (r.status === "answered") rfis.answered++;
+      else if (r.status === "closed") rfis.closed++;
+    }
+
+    const submittals = { draft: 0, submitted: 0, underReview: 0, returned: 0, total: subRes.rows.length };
+    for (const s of subRes.rows) {
+      if (s.status === "draft") submittals.draft++;
+      else if (s.status === "submitted") submittals.submitted++;
+      else if (s.status === "under_review") submittals.underReview++;
+      else if (s.status === "returned") submittals.returned++;
+    }
+
+    result.changeOrders = changeOrders;
+    result.rfis = rfis;
+    result.submittals = submittals;
+    result.dailyLogs = { total: logCountRes.rows[0].n, lastLogDate: logRes.rows[0] ? logRes.rows[0].log_date : null };
+  } else if (vertical === "projects") {
+    const [approvalRes, timeRes] = await Promise.all([
+      pool.query("SELECT status FROM approval_requests WHERE project_id = $1 AND deleted_at IS NULL", [projectId]),
+      pool.query("SELECT minutes, billable FROM time_entries WHERE project_id = $1 AND deleted_at IS NULL", [projectId]),
+    ]);
+
+    const approvals = { pending: 0, approved: 0, rejected: 0, total: approvalRes.rows.length };
+    for (const a of approvalRes.rows) {
+      if (a.status === "pending") approvals.pending++;
+      else if (a.status === "approved") approvals.approved++;
+      else if (a.status === "rejected") approvals.rejected++;
+    }
+
+    const timeTracking = { totalMinutes: 0, billableMinutes: 0, entryCount: timeRes.rows.length };
+    for (const t of timeRes.rows) {
+      timeTracking.totalMinutes += t.minutes;
+      if (t.billable) timeTracking.billableMinutes += t.minutes;
+    }
+
+    result.approvals = approvals;
+    result.timeTracking = timeTracking;
+  } else if (vertical === "facilities") {
+    const [woRes, inspRes] = await Promise.all([
+      pool.query("SELECT status FROM work_orders WHERE project_id = $1 AND deleted_at IS NULL", [projectId]),
+      pool.query("SELECT status FROM inspections WHERE project_id = $1 AND deleted_at IS NULL", [projectId]),
+    ]);
+
+    const workOrders = { open: 0, assigned: 0, inProgress: 0, completed: 0, cancelled: 0, total: woRes.rows.length };
+    for (const w of woRes.rows) {
+      if (w.status === "open") workOrders.open++;
+      else if (w.status === "assigned") workOrders.assigned++;
+      else if (w.status === "in_progress") workOrders.inProgress++;
+      else if (w.status === "completed") workOrders.completed++;
+      else if (w.status === "cancelled") workOrders.cancelled++;
+    }
+
+    const inspections = { scheduled: 0, inProgress: 0, completed: 0, cancelled: 0, total: inspRes.rows.length };
+    for (const i of inspRes.rows) {
+      if (i.status === "scheduled") inspections.scheduled++;
+      else if (i.status === "in_progress") inspections.inProgress++;
+      else if (i.status === "completed") inspections.completed++;
+      else if (i.status === "cancelled") inspections.cancelled++;
+    }
+
+    result.workOrders = workOrders;
+    result.inspections = inspections;
   }
 
-  const rfis = { open: 0, answered: 0, closed: 0, total: rfiRes.rows.length };
-  for (const r of rfiRes.rows) {
-    if (r.status === "open") rfis.open++;
-    else if (r.status === "answered") rfis.answered++;
-    else if (r.status === "closed") rfis.closed++;
-  }
-
-  const submittals = { draft: 0, submitted: 0, underReview: 0, returned: 0, total: subRes.rows.length };
-  for (const s of subRes.rows) {
-    if (s.status === "draft") submittals.draft++;
-    else if (s.status === "submitted") submittals.submitted++;
-    else if (s.status === "under_review") submittals.underReview++;
-    else if (s.status === "returned") submittals.returned++;
-  }
-
-  return {
-    tasks,
-    changeOrders,
-    rfis,
-    submittals,
-    budget: { totals: budget.totals },
-    dailyLogs: { total: logCountRes.rows[0].n, lastLogDate: logRes.rows[0] ? logRes.rows[0].log_date : null },
-  };
+  return result;
 }
 
 async function getRfiLog(projectId) {
@@ -609,29 +656,69 @@ function renderPdf(res, type, project, data) {
     pdfKeyValueRow(doc, "Actual", dollars(data.budget.totals.actualCents));
     pdfKeyValueRow(doc, "Remaining", dollars(data.budget.totals.remainingCents));
 
-    pdfSectionTitle(doc, "Change Orders");
-    pdfKeyValueRow(doc, "Draft", data.changeOrders.draft);
-    pdfKeyValueRow(doc, "Submitted", data.changeOrders.submitted);
-    pdfKeyValueRow(doc, "Approved", data.changeOrders.approved);
-    pdfKeyValueRow(doc, "Rejected", data.changeOrders.rejected);
-    pdfKeyValueRow(doc, "Net Approved Cost Impact", dollars(data.changeOrders.netApprovedCostImpactCents));
+    if (data.changeOrders) {
+      pdfSectionTitle(doc, "Change Orders");
+      pdfKeyValueRow(doc, "Draft", data.changeOrders.draft);
+      pdfKeyValueRow(doc, "Submitted", data.changeOrders.submitted);
+      pdfKeyValueRow(doc, "Approved", data.changeOrders.approved);
+      pdfKeyValueRow(doc, "Rejected", data.changeOrders.rejected);
+      pdfKeyValueRow(doc, "Net Approved Cost Impact", dollars(data.changeOrders.netApprovedCostImpactCents));
+    }
 
-    pdfSectionTitle(doc, "RFIs");
-    pdfKeyValueRow(doc, "Open", data.rfis.open);
-    pdfKeyValueRow(doc, "Answered", data.rfis.answered);
-    pdfKeyValueRow(doc, "Closed", data.rfis.closed);
-    pdfKeyValueRow(doc, "Total", data.rfis.total);
+    if (data.rfis) {
+      pdfSectionTitle(doc, "RFIs");
+      pdfKeyValueRow(doc, "Open", data.rfis.open);
+      pdfKeyValueRow(doc, "Answered", data.rfis.answered);
+      pdfKeyValueRow(doc, "Closed", data.rfis.closed);
+      pdfKeyValueRow(doc, "Total", data.rfis.total);
+    }
 
-    pdfSectionTitle(doc, "Submittals");
-    pdfKeyValueRow(doc, "Draft", data.submittals.draft);
-    pdfKeyValueRow(doc, "Submitted", data.submittals.submitted);
-    pdfKeyValueRow(doc, "Under Review", data.submittals.underReview);
-    pdfKeyValueRow(doc, "Returned", data.submittals.returned);
-    pdfKeyValueRow(doc, "Total", data.submittals.total);
+    if (data.submittals) {
+      pdfSectionTitle(doc, "Submittals");
+      pdfKeyValueRow(doc, "Draft", data.submittals.draft);
+      pdfKeyValueRow(doc, "Submitted", data.submittals.submitted);
+      pdfKeyValueRow(doc, "Under Review", data.submittals.underReview);
+      pdfKeyValueRow(doc, "Returned", data.submittals.returned);
+      pdfKeyValueRow(doc, "Total", data.submittals.total);
+    }
 
-    pdfSectionTitle(doc, "Daily Logs");
-    pdfKeyValueRow(doc, "Total Logs", data.dailyLogs.total);
-    pdfKeyValueRow(doc, "Most Recent", data.dailyLogs.lastLogDate ? new Date(data.dailyLogs.lastLogDate).toLocaleDateString() : "—");
+    if (data.dailyLogs) {
+      pdfSectionTitle(doc, "Daily Logs");
+      pdfKeyValueRow(doc, "Total Logs", data.dailyLogs.total);
+      pdfKeyValueRow(doc, "Most Recent", data.dailyLogs.lastLogDate ? new Date(data.dailyLogs.lastLogDate).toLocaleDateString() : "—");
+    }
+
+    if (data.approvals) {
+      pdfSectionTitle(doc, "Approvals");
+      pdfKeyValueRow(doc, "Pending", data.approvals.pending);
+      pdfKeyValueRow(doc, "Approved", data.approvals.approved);
+      pdfKeyValueRow(doc, "Rejected", data.approvals.rejected);
+      pdfKeyValueRow(doc, "Total", data.approvals.total);
+    }
+
+    if (data.timeTracking) {
+      pdfSectionTitle(doc, "Time Tracking");
+      pdfKeyValueRow(doc, "Total Hours", (data.timeTracking.totalMinutes / 60).toFixed(2));
+      pdfKeyValueRow(doc, "Billable Hours", (data.timeTracking.billableMinutes / 60).toFixed(2));
+      pdfKeyValueRow(doc, "Entries", data.timeTracking.entryCount);
+    }
+
+    if (data.workOrders) {
+      pdfSectionTitle(doc, "Work Orders");
+      pdfKeyValueRow(doc, "Open", data.workOrders.open);
+      pdfKeyValueRow(doc, "Assigned", data.workOrders.assigned);
+      pdfKeyValueRow(doc, "In Progress", data.workOrders.inProgress);
+      pdfKeyValueRow(doc, "Completed", data.workOrders.completed);
+      pdfKeyValueRow(doc, "Total", data.workOrders.total);
+    }
+
+    if (data.inspections) {
+      pdfSectionTitle(doc, "Inspections");
+      pdfKeyValueRow(doc, "Scheduled", data.inspections.scheduled);
+      pdfKeyValueRow(doc, "In Progress", data.inspections.inProgress);
+      pdfKeyValueRow(doc, "Completed", data.inspections.completed);
+      pdfKeyValueRow(doc, "Total", data.inspections.total);
+    }
   }
 
   if (type === "budget-vs-actual") {
@@ -798,27 +885,79 @@ function buildWorkbook(type, project, data) {
       ["Budget — Committed", dollarsNum(data.budget.totals.committedCents)],
       ["Budget — Actual", dollarsNum(data.budget.totals.actualCents)],
       ["Budget — Remaining", dollarsNum(data.budget.totals.remainingCents)],
-      [],
-      ["Change Orders — Draft", data.changeOrders.draft],
-      ["Change Orders — Submitted", data.changeOrders.submitted],
-      ["Change Orders — Approved", data.changeOrders.approved],
-      ["Change Orders — Rejected", data.changeOrders.rejected],
-      ["Change Orders — Net Approved Cost Impact", dollarsNum(data.changeOrders.netApprovedCostImpactCents)],
-      [],
-      ["RFIs — Open", data.rfis.open],
-      ["RFIs — Answered", data.rfis.answered],
-      ["RFIs — Closed", data.rfis.closed],
-      ["RFIs — Total", data.rfis.total],
-      [],
-      ["Submittals — Draft", data.submittals.draft],
-      ["Submittals — Submitted", data.submittals.submitted],
-      ["Submittals — Under Review", data.submittals.underReview],
-      ["Submittals — Returned", data.submittals.returned],
-      ["Submittals — Total", data.submittals.total],
-      [],
-      ["Daily Logs — Total", data.dailyLogs.total],
-      ["Daily Logs — Most Recent", data.dailyLogs.lastLogDate ? new Date(data.dailyLogs.lastLogDate).toLocaleDateString() : "—"],
     ];
+    if (data.changeOrders) {
+      rows.push(
+        [],
+        ["Change Orders — Draft", data.changeOrders.draft],
+        ["Change Orders — Submitted", data.changeOrders.submitted],
+        ["Change Orders — Approved", data.changeOrders.approved],
+        ["Change Orders — Rejected", data.changeOrders.rejected],
+        ["Change Orders — Net Approved Cost Impact", dollarsNum(data.changeOrders.netApprovedCostImpactCents)]
+      );
+    }
+    if (data.rfis) {
+      rows.push(
+        [],
+        ["RFIs — Open", data.rfis.open],
+        ["RFIs — Answered", data.rfis.answered],
+        ["RFIs — Closed", data.rfis.closed],
+        ["RFIs — Total", data.rfis.total]
+      );
+    }
+    if (data.submittals) {
+      rows.push(
+        [],
+        ["Submittals — Draft", data.submittals.draft],
+        ["Submittals — Submitted", data.submittals.submitted],
+        ["Submittals — Under Review", data.submittals.underReview],
+        ["Submittals — Returned", data.submittals.returned],
+        ["Submittals — Total", data.submittals.total]
+      );
+    }
+    if (data.dailyLogs) {
+      rows.push(
+        [],
+        ["Daily Logs — Total", data.dailyLogs.total],
+        ["Daily Logs — Most Recent", data.dailyLogs.lastLogDate ? new Date(data.dailyLogs.lastLogDate).toLocaleDateString() : "—"]
+      );
+    }
+    if (data.approvals) {
+      rows.push(
+        [],
+        ["Approvals — Pending", data.approvals.pending],
+        ["Approvals — Approved", data.approvals.approved],
+        ["Approvals — Rejected", data.approvals.rejected],
+        ["Approvals — Total", data.approvals.total]
+      );
+    }
+    if (data.timeTracking) {
+      rows.push(
+        [],
+        ["Time Tracking — Total Hours", Number((data.timeTracking.totalMinutes / 60).toFixed(2))],
+        ["Time Tracking — Billable Hours", Number((data.timeTracking.billableMinutes / 60).toFixed(2))],
+        ["Time Tracking — Entries", data.timeTracking.entryCount]
+      );
+    }
+    if (data.workOrders) {
+      rows.push(
+        [],
+        ["Work Orders — Open", data.workOrders.open],
+        ["Work Orders — Assigned", data.workOrders.assigned],
+        ["Work Orders — In Progress", data.workOrders.inProgress],
+        ["Work Orders — Completed", data.workOrders.completed],
+        ["Work Orders — Total", data.workOrders.total]
+      );
+    }
+    if (data.inspections) {
+      rows.push(
+        [],
+        ["Inspections — Scheduled", data.inspections.scheduled],
+        ["Inspections — In Progress", data.inspections.inProgress],
+        ["Inspections — Completed", data.inspections.completed],
+        ["Inspections — Total", data.inspections.total]
+      );
+    }
     for (const r of rows) sheet.addRow(r);
   }
 

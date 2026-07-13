@@ -69,45 +69,105 @@ function StatusSummaryView({ data }) {
         </div>
       </div>
 
-      <div className="card" style={cardStyle}>
-        <h3 style={{ fontSize: "0.95rem", textTransform: "uppercase", marginBottom: "0.7rem" }}>Change Orders</h3>
-        <div style={statGrid}>
-          <Stat label="Draft" value={data.changeOrders.draft} />
-          <Stat label="Submitted" value={data.changeOrders.submitted} />
-          <Stat label="Approved" value={data.changeOrders.approved} />
-          <Stat label="Rejected" value={data.changeOrders.rejected} />
-          <Stat label="Net Approved Impact" value={fmtMoney(data.changeOrders.netApprovedCostImpactCents)} />
+      {/* Construction-only sections — only present in the payload for a
+          Construction-vertical project (see getStatusSummary in reports.js). */}
+      {data.changeOrders && (
+        <div className="card" style={cardStyle}>
+          <h3 style={{ fontSize: "0.95rem", textTransform: "uppercase", marginBottom: "0.7rem" }}>Change Orders</h3>
+          <div style={statGrid}>
+            <Stat label="Draft" value={data.changeOrders.draft} />
+            <Stat label="Submitted" value={data.changeOrders.submitted} />
+            <Stat label="Approved" value={data.changeOrders.approved} />
+            <Stat label="Rejected" value={data.changeOrders.rejected} />
+            <Stat label="Net Approved Impact" value={fmtMoney(data.changeOrders.netApprovedCostImpactCents)} />
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="card" style={cardStyle}>
-        <h3 style={{ fontSize: "0.95rem", textTransform: "uppercase", marginBottom: "0.7rem" }}>RFIs</h3>
-        <div style={statGrid}>
-          <Stat label="Open" value={data.rfis.open} />
-          <Stat label="Answered" value={data.rfis.answered} />
-          <Stat label="Closed" value={data.rfis.closed} />
-          <Stat label="Total" value={data.rfis.total} />
+      {data.rfis && (
+        <div className="card" style={cardStyle}>
+          <h3 style={{ fontSize: "0.95rem", textTransform: "uppercase", marginBottom: "0.7rem" }}>RFIs</h3>
+          <div style={statGrid}>
+            <Stat label="Open" value={data.rfis.open} />
+            <Stat label="Answered" value={data.rfis.answered} />
+            <Stat label="Closed" value={data.rfis.closed} />
+            <Stat label="Total" value={data.rfis.total} />
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="card" style={cardStyle}>
-        <h3 style={{ fontSize: "0.95rem", textTransform: "uppercase", marginBottom: "0.7rem" }}>Submittals</h3>
-        <div style={statGrid}>
-          <Stat label="Draft" value={data.submittals.draft} />
-          <Stat label="Submitted" value={data.submittals.submitted} />
-          <Stat label="Under Review" value={data.submittals.underReview} />
-          <Stat label="Returned" value={data.submittals.returned} />
-          <Stat label="Total" value={data.submittals.total} />
+      {data.submittals && (
+        <div className="card" style={cardStyle}>
+          <h3 style={{ fontSize: "0.95rem", textTransform: "uppercase", marginBottom: "0.7rem" }}>Submittals</h3>
+          <div style={statGrid}>
+            <Stat label="Draft" value={data.submittals.draft} />
+            <Stat label="Submitted" value={data.submittals.submitted} />
+            <Stat label="Under Review" value={data.submittals.underReview} />
+            <Stat label="Returned" value={data.submittals.returned} />
+            <Stat label="Total" value={data.submittals.total} />
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="card" style={cardStyle}>
-        <h3 style={{ fontSize: "0.95rem", textTransform: "uppercase", marginBottom: "0.7rem" }}>Daily Logs</h3>
-        <div style={statGrid}>
-          <Stat label="Total Logs" value={data.dailyLogs.total} />
-          <Stat label="Most Recent" value={data.dailyLogs.lastLogDate ? new Date(data.dailyLogs.lastLogDate).toLocaleDateString() : "—"} />
+      {data.dailyLogs && (
+        <div className="card" style={cardStyle}>
+          <h3 style={{ fontSize: "0.95rem", textTransform: "uppercase", marginBottom: "0.7rem" }}>Daily Logs</h3>
+          <div style={statGrid}>
+            <Stat label="Total Logs" value={data.dailyLogs.total} />
+            <Stat label="Most Recent" value={data.dailyLogs.lastLogDate ? new Date(data.dailyLogs.lastLogDate).toLocaleDateString() : "—"} />
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Projects-only sections. */}
+      {data.approvals && (
+        <div className="card" style={cardStyle}>
+          <h3 style={{ fontSize: "0.95rem", textTransform: "uppercase", marginBottom: "0.7rem" }}>Approvals</h3>
+          <div style={statGrid}>
+            <Stat label="Pending" value={data.approvals.pending} />
+            <Stat label="Approved" value={data.approvals.approved} />
+            <Stat label="Rejected" value={data.approvals.rejected} />
+            <Stat label="Total" value={data.approvals.total} />
+          </div>
+        </div>
+      )}
+
+      {data.timeTracking && (
+        <div className="card" style={cardStyle}>
+          <h3 style={{ fontSize: "0.95rem", textTransform: "uppercase", marginBottom: "0.7rem" }}>Time Tracking</h3>
+          <div style={statGrid}>
+            <Stat label="Total Hours" value={(data.timeTracking.totalMinutes / 60).toFixed(2)} />
+            <Stat label="Billable Hours" value={(data.timeTracking.billableMinutes / 60).toFixed(2)} />
+            <Stat label="Entries" value={data.timeTracking.entryCount} />
+          </div>
+        </div>
+      )}
+
+      {/* Facilities-only sections. */}
+      {data.workOrders && (
+        <div className="card" style={cardStyle}>
+          <h3 style={{ fontSize: "0.95rem", textTransform: "uppercase", marginBottom: "0.7rem" }}>Work Orders</h3>
+          <div style={statGrid}>
+            <Stat label="Open" value={data.workOrders.open} />
+            <Stat label="Assigned" value={data.workOrders.assigned} />
+            <Stat label="In Progress" value={data.workOrders.inProgress} />
+            <Stat label="Completed" value={data.workOrders.completed} />
+            <Stat label="Total" value={data.workOrders.total} />
+          </div>
+        </div>
+      )}
+
+      {data.inspections && (
+        <div className="card" style={cardStyle}>
+          <h3 style={{ fontSize: "0.95rem", textTransform: "uppercase", marginBottom: "0.7rem" }}>Inspections</h3>
+          <div style={statGrid}>
+            <Stat label="Scheduled" value={data.inspections.scheduled} />
+            <Stat label="In Progress" value={data.inspections.inProgress} />
+            <Stat label="Completed" value={data.inspections.completed} />
+            <Stat label="Total" value={data.inspections.total} />
+          </div>
+        </div>
+      )}
     </>
   );
 }
