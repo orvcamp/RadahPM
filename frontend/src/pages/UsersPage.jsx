@@ -100,6 +100,84 @@ function NewUserModal({ onClose, onCreated }) {
   );
 }
 
+function DeleteUserModal({ user, onClose, onDeleted }) {
+  const [preview, setPreview] = useState(null);
+  const [error, setError] = useState("");
+  const [confirmText, setConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    api.get(`/users/${user.id}/deletion-preview`)
+      .then((d) => setPreview(d))
+      .catch((err) => setError(err.message));
+  }, [user.id]);
+
+  const counts = preview ? Object.entries(preview.willPermanentlyDelete).filter(([, n]) => n > 0) : [];
+  const canDelete = confirmText.trim() === user.fullName;
+
+  async function handleDelete() {
+    setDeleting(true);
+    setError("");
+    try {
+      await api.delete(`/users/${user.id}`);
+      onDeleted(user.id);
+    } catch (err) {
+      setError(err.message);
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3 style={{ fontSize: "1.1rem", textTransform: "uppercase", color: "var(--red, #B23B3B)" }}>Permanently Delete User</h3>
+          <button className="modal-close" onClick={onClose}>&times;</button>
+        </div>
+        {error && <div className="error-msg">{error}</div>}
+        {!preview ? (
+          <div className="loading-spinner" />
+        ) : (
+          <>
+            <p className="text-sm" style={{ marginBottom: "0.8rem" }}>
+              This cannot be undone. <strong>{user.fullName}</strong> ({user.email}) will be permanently removed.
+            </p>
+            {counts.length > 0 ? (
+              <div className="error-msg" style={{ marginBottom: "1rem" }}>
+                <strong>This will also permanently delete:</strong>
+                <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.2rem" }}>
+                  {counts.map(([key, n]) => (
+                    <li key={key}>{n} {key.replace(/([A-Z])/g, " $1").toLowerCase()}</li>
+                  ))}
+                </ul>
+                <p style={{ marginTop: "0.5rem" }}>
+                  If you want to keep this history, use <strong>Remove (free email)</strong> instead — it deactivates the account without deleting anything they created.
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-steel" style={{ marginBottom: "1rem" }}>
+                They have no time entries, approvals, comments, or project memberships on record — nothing else will be affected.
+              </p>
+            )}
+            <div className="field">
+              <label>Type <strong>{user.fullName}</strong> to confirm</label>
+              <input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} />
+            </div>
+            <button
+              className="btn btn-danger"
+              style={{ width: "100%", justifyContent: "center" }}
+              disabled={!canDelete || deleting}
+              onClick={handleDelete}
+            >
+              {deleting ? "Deleting..." : "Permanently Delete"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function UsersPage() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -107,6 +185,7 @@ export default function UsersPage() {
   const [showNew, setShowNew] = useState(false);
   const [roleFilter, setRoleFilter] = useState("all");
   const [resetInfo, setResetInfo] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   function load() {
     setLoading(true);
@@ -130,6 +209,16 @@ export default function UsersPage() {
     try {
       const data = await api.post(`/users/${u.id}/reset-password`, {});
       setResetInfo({ user: u, password: data.temporaryPassword });
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  async function removeUser(u) {
+    if (!confirm(`Remove ${u.fullName} and free up "${u.email}" for reuse? Their history (time entries, approvals, etc.) is kept — only their account access and email change.`)) return;
+    try {
+      const data = await api.post(`/users/${u.id}/remove`, {});
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? data.user : x)));
     } catch (err) {
       alert(err.message);
     }
@@ -175,12 +264,18 @@ export default function UsersPage() {
                   <td>{u.companyName || "—"}</td>
                   <td>{u.isActive ? <span className="badge badge-active">active</span> : <span className="badge badge-cancelled">inactive</span>}</td>
                   <td>
-                    <div style={{ display: "flex", gap: "0.4rem" }}>
+                    <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
                       <button className="btn btn-outline btn-sm" onClick={() => toggleActive(u)}>
                         {u.isActive ? "Deactivate" : "Reactivate"}
                       </button>
                       <button className="btn btn-outline btn-sm" onClick={() => resetPassword(u)}>
                         Reset Password
+                      </button>
+                      <button className="btn btn-outline btn-sm" onClick={() => removeUser(u)}>
+                        Remove (free email)
+                      </button>
+                      <button className="btn btn-danger btn-sm" onClick={() => setDeleteTarget(u)}>
+                        Delete Permanently
                       </button>
                     </div>
                   </td>
@@ -217,6 +312,17 @@ export default function UsersPage() {
             <button className="btn btn-primary mt-2" style={{ width: "100%", justifyContent: "center" }} onClick={() => setResetInfo(null)}>Done</button>
           </div>
         </div>
+      )}
+
+      {deleteTarget && (
+        <DeleteUserModal
+          user={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={(id) => {
+            setDeleteTarget(null);
+            setUsers((prev) => prev.filter((u) => u.id !== id));
+          }}
+        />
       )}
     </div>
   );

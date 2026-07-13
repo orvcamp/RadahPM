@@ -176,4 +176,124 @@ router.post("/:id/reset-password", requireAuth, requireOrg, requireRole("admin",
   }
 });
 
+/**
+ * POST /api/users/:id/remove
+ * Admin only. The primary "clean removal" tool: deactivates the account
+ * AND frees up their email address for reuse (e.g. re-inviting a
+ * replacement hire at the same email), by renaming the stored email off
+ * to the side. Unlike a hard delete, this preserves every historical
+ * record the person is attached to (time entries, approval decisions,
+ * task comments, "created by" on documents/RFIs/etc.) — those all
+ * reference this row via ON DELETE SET NULL or just stay pointed at it,
+ * so audit trails keep working. Their name still shows correctly
+ * everywhere; only their email and ability to log in change.
+ * Cannot remove yourself, and cannot remove the org's last active admin
+ * (would orphan the organization with no one able to manage it).
+ */
+router.post("/:id/remove", requireAuth, requireOrg, requireRole("admin"), async (req, res) => {
+  if (req.params.id === req.user.id) {
+    return res.status(400).json({ error: "You can't remove your own account. Have another admin do it." });
+  }
+  try {
+    const target = await pool.query("SELECT * FROM users WHERE id = $1 AND org_id = $2", [req.params.id, req.user.orgId]);
+    if (!target.rows[0]) return res.status(404).json({ error: "User not found." });
+
+    if (target.rows[0].role === "admin") {
+      const otherAdmins = await pool.query(
+        "SELECT COUNT(*)::int AS n FROM users WHERE org_id = $1 AND role = 'admin' AND is_active = TRUE AND id != $2",
+        [req.user.orgId, req.params.id]
+      );
+      if (otherAdmins.rows[0].n === 0) {
+        return res.status(409).json({ error: "This is the last active admin on the account. Promote someone else to admin first." });
+      }
+    }
+
+    const freedEmail = `deleted-${Date.now()}-${target.rows[0].email}`;
+    const result = await pool.query(
+      "UPDATE users SET is_active = FALSE, email = $1 WHERE id = $2 RETURNING *",
+      [freedEmail, req.params.id]
+    );
+    await revokeUserSessions(req.params.id);
+    res.json({
+      user: publicUser(result.rows[0]),
+      message: `${target.rows[0].full_name} was removed. "${target.rows[0].email}" is now free to use for a new invite.`,
+    });
+  } catch (err) {
+    console.error("[radah-pm] remove user error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
+/**
+ * GET /api/users/:id/deletion-preview
+ * Admin only. Reports what a permanent delete would actually destroy —
+ * the records that CASCADE-delete along with the user (time entries,
+ * approval requests they made, task comments, project memberships) —
+ * so the confirmation dialog can tell the truth about what's about to
+ * happen instead of a generic "are you sure?".
+ */
+router.get("/:id/deletion-preview", requireAuth, requireOrg, requireRole("admin"), async (req, res) => {
+  try {
+    const target = await pool.query("SELECT id, full_name, email FROM users WHERE id = $1 AND org_id = $2", [req.params.id, req.user.orgId]);
+    if (!target.rows[0]) return res.status(404).json({ error: "User not found." });
+
+    const [timeEntries, approvalsRequested, taskComments, memberships] = await Promise.all([
+      pool.query("SELECT COUNT(*)::int AS n FROM time_entries WHERE user_id = $1", [req.params.id]),
+      pool.query("SELECT COUNT(*)::int AS n FROM approval_requests WHERE requested_by = $1", [req.params.id]),
+      pool.query("SELECT COUNT(*)::int AS n FROM task_comments WHERE user_id = $1", [req.params.id]),
+      pool.query("SELECT COUNT(*)::int AS n FROM project_members WHERE user_id = $1", [req.params.id]),
+    ]);
+
+    res.json({
+      fullName: target.rows[0].full_name,
+      email: target.rows[0].email,
+      willPermanentlyDelete: {
+        timeEntries: timeEntries.rows[0].n,
+        approvalRequestsMade: approvalsRequested.rows[0].n,
+        taskComments: taskComments.rows[0].n,
+        projectMemberships: memberships.rows[0].n,
+      },
+    });
+  } catch (err) {
+    console.error("[radah-pm] user deletion preview error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
+/**
+ * DELETE /api/users/:id
+ * Admin only, and only after the frontend has shown the deletion preview
+ * above. True permanent delete — unlike /:id/remove, this actually
+ * destroys the row and anything that CASCADEs from it (see the preview
+ * endpoint for exactly what that is). Prefer POST /:id/remove for the
+ * common case of someone leaving; this is for cleaning up a mistaken
+ * invite or a test account that never should have existed.
+ */
+router.delete("/:id", requireAuth, requireOrg, requireRole("admin"), async (req, res) => {
+  if (req.params.id === req.user.id) {
+    return res.status(400).json({ error: "You can't delete your own account. Have another admin do it." });
+  }
+  try {
+    const target = await pool.query("SELECT role FROM users WHERE id = $1 AND org_id = $2", [req.params.id, req.user.orgId]);
+    if (!target.rows[0]) return res.status(404).json({ error: "User not found." });
+
+    if (target.rows[0].role === "admin") {
+      const otherAdmins = await pool.query(
+        "SELECT COUNT(*)::int AS n FROM users WHERE org_id = $1 AND role = 'admin' AND is_active = TRUE AND id != $2",
+        [req.user.orgId, req.params.id]
+      );
+      if (otherAdmins.rows[0].n === 0) {
+        return res.status(409).json({ error: "This is the last active admin on the account. Promote someone else to admin first." });
+      }
+    }
+
+    const result = await pool.query("DELETE FROM users WHERE id = $1 AND org_id = $2 RETURNING id", [req.params.id, req.user.orgId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: "User not found." });
+    res.json({ message: "User permanently deleted." });
+  } catch (err) {
+    console.error("[radah-pm] delete user error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
 module.exports = router;

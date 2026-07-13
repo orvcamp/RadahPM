@@ -205,6 +205,58 @@ router.patch("/:id", requireAuth, requireOrg, requireRole("admin", "staff"), asy
  * DELETE /api/projects/:id
  * Admin only (more destructive than other admin/staff actions).
  */
+/**
+ * GET /api/projects/:id/deletion-preview
+ * Admin only. Reports what a permanent project delete would destroy —
+ * every child record that CASCADEs from the projects row — so the
+ * confirmation dialog can say something true instead of a generic
+ * "are you sure?". Counts across every module regardless of which
+ * vertical this project's org is on; a query against a table with no
+ * matching rows just comes back 0.
+ */
+router.get("/:id/deletion-preview", requireAuth, requireOrg, requireRole("admin"), async (req, res) => {
+  try {
+    const proj = await pool.query("SELECT id, name FROM projects WHERE id = $1 AND org_id = $2", [req.params.id, req.user.orgId]);
+    if (!proj.rows[0]) return res.status(404).json({ error: "Project not found." });
+
+    const count = (sql) => pool.query(sql, [req.params.id]).then((r) => r.rows[0].n);
+    const [
+      tasks, documents, budgetLines, members,
+      rfis, submittals, changeOrders, dailyLogs, payApplications,
+      assets, workOrders, inspections,
+      approvalRequests, timeEntries,
+    ] = await Promise.all([
+      count("SELECT COUNT(*)::int AS n FROM tasks WHERE project_id = $1"),
+      count("SELECT COUNT(*)::int AS n FROM documents WHERE project_id = $1"),
+      count("SELECT COUNT(*)::int AS n FROM budget_lines WHERE project_id = $1"),
+      count("SELECT COUNT(*)::int AS n FROM project_members WHERE project_id = $1"),
+      count("SELECT COUNT(*)::int AS n FROM rfis WHERE project_id = $1"),
+      count("SELECT COUNT(*)::int AS n FROM submittals WHERE project_id = $1"),
+      count("SELECT COUNT(*)::int AS n FROM change_orders WHERE project_id = $1"),
+      count("SELECT COUNT(*)::int AS n FROM daily_logs WHERE project_id = $1"),
+      count("SELECT COUNT(*)::int AS n FROM pay_applications WHERE project_id = $1"),
+      count("SELECT COUNT(*)::int AS n FROM assets WHERE project_id = $1"),
+      count("SELECT COUNT(*)::int AS n FROM work_orders WHERE project_id = $1"),
+      count("SELECT COUNT(*)::int AS n FROM inspections WHERE project_id = $1"),
+      count("SELECT COUNT(*)::int AS n FROM approval_requests WHERE project_id = $1"),
+      count("SELECT COUNT(*)::int AS n FROM time_entries WHERE project_id = $1"),
+    ]);
+
+    res.json({
+      name: proj.rows[0].name,
+      willPermanentlyDelete: {
+        tasks, documents, budgetLines, teamMembers: members,
+        rfis, submittals, changeOrders, dailyLogs, payApplications,
+        assets, workOrders, inspections,
+        approvalRequests, timeEntries,
+      },
+    });
+  } catch (err) {
+    console.error("[radah-pm] project deletion preview error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
 router.delete("/:id", requireAuth, requireOrg, requireRole("admin"), async (req, res) => {
   try {
     const result = await pool.query(

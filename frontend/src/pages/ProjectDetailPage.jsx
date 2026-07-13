@@ -1,7 +1,7 @@
 // src/pages/ProjectDetailPage.jsx
 
 import { useEffect, useState, useCallback } from "react";
-import { useParams, Link, useSearchParams } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext.jsx";
 import GanttChart from "../components/GanttChart.jsx";
@@ -159,8 +159,83 @@ function AddMemberInline({ projectId, onAdded }) {
   );
 }
 
+function DeleteProjectModal({ projectId, projectName, onClose, onDeleted }) {
+  const [preview, setPreview] = useState(null);
+  const [error, setError] = useState("");
+  const [confirmText, setConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    api.get(`/projects/${projectId}/deletion-preview`)
+      .then((d) => setPreview(d))
+      .catch((err) => setError(err.message));
+  }, [projectId]);
+
+  const counts = preview ? Object.entries(preview.willPermanentlyDelete).filter(([, n]) => n > 0) : [];
+  const canDelete = confirmText.trim() === projectName;
+
+  async function handleDelete() {
+    setDeleting(true);
+    setError("");
+    try {
+      await api.delete(`/projects/${projectId}`);
+      onDeleted();
+    } catch (err) {
+      setError(err.message);
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3 style={{ fontSize: "1.1rem", textTransform: "uppercase", color: "var(--red, #B23B3B)" }}>Permanently Delete Project</h3>
+          <button className="modal-close" onClick={onClose}>&times;</button>
+        </div>
+        {error && <div className="error-msg">{error}</div>}
+        {!preview ? (
+          <div className="loading-spinner" />
+        ) : (
+          <>
+            <p className="text-sm" style={{ marginBottom: "0.8rem" }}>
+              This cannot be undone. <strong>{projectName}</strong> and everything in it will be permanently deleted.
+            </p>
+            {counts.length > 0 ? (
+              <div className="error-msg" style={{ marginBottom: "1rem" }}>
+                <strong>This will permanently delete:</strong>
+                <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.2rem" }}>
+                  {counts.map(([key, n]) => (
+                    <li key={key}>{n} {key.replace(/([A-Z])/g, " $1").toLowerCase()}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="text-sm text-steel" style={{ marginBottom: "1rem" }}>This project has no records in it yet — deleting it won't affect anything else.</p>
+            )}
+            <div className="field">
+              <label>Type <strong>{projectName}</strong> to confirm</label>
+              <input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} />
+            </div>
+            <button
+              className="btn btn-danger"
+              style={{ width: "100%", justifyContent: "center" }}
+              disabled={!canDelete || deleting}
+              onClick={handleDelete}
+            >
+              {deleting ? "Deleting..." : "Permanently Delete Project"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ProjectDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const [showDeleteProject, setShowDeleteProject] = useState(false);
   const { user } = useAuth();
   const isInternal = user.role === "admin" || user.role === "staff";
 
@@ -427,7 +502,7 @@ export default function ProjectDetailPage() {
           ) : (
             <table className="data-table">
               <thead>
-                <tr><th>Name</th><th>Role</th><th>Company</th><th>Project Role</th></tr>
+                <tr><th>Name</th><th>Role</th><th>Company</th><th>Project Role</th>{isInternal && <th></th>}</tr>
               </thead>
               <tbody>
                 {members.map((m) => (
@@ -436,10 +511,38 @@ export default function ProjectDetailPage() {
                     <td><span className="role-badge">{m.platformRole.replace("_", " ")}</span></td>
                     <td>{m.companyName || "—"}</td>
                     <td>{m.membershipRole.replace("_", " ")}</td>
+                    {isInternal && (
+                      <td>
+                        <button
+                          className="btn btn-outline btn-sm"
+                          onClick={async () => {
+                            if (!confirm(`Remove ${m.fullName} from this project's team? This doesn't delete their account — just their access to this project.`)) return;
+                            try {
+                              await api.delete(`/projects/${id}/members/${m.userId}`);
+                              setMembers((prev) => prev.filter((x) => x.membershipId !== m.membershipId));
+                            } catch (err) {
+                              alert(err.message);
+                            }
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
+          )}
+
+          {user.role === "admin" && (
+            <div style={{ marginTop: "2rem", paddingTop: "1.2rem", borderTop: "1px solid var(--line)" }}>
+              <h3 style={{ fontSize: "0.9rem", textTransform: "uppercase", color: "var(--red, #B23B3B)", marginBottom: "0.5rem" }}>Danger Zone</h3>
+              <p className="text-sm text-steel" style={{ marginBottom: "0.8rem" }}>
+                Permanently delete this project and everything in it — documents, budget, tasks, and every module's records. This cannot be undone.
+              </p>
+              <button className="btn btn-danger" onClick={() => setShowDeleteProject(true)}>Delete This Project</button>
+            </div>
           )}
         </div>
       )}
@@ -487,6 +590,15 @@ export default function ProjectDetailPage() {
 
       {viewSchedule && (
         <DocumentViewerModal doc={viewSchedule} onClose={() => setViewSchedule(null)} />
+      )}
+
+      {showDeleteProject && (
+        <DeleteProjectModal
+          projectId={id}
+          projectName={project.name}
+          onClose={() => setShowDeleteProject(false)}
+          onDeleted={() => navigate("/projects")}
+        />
       )}
     </div>
   );
