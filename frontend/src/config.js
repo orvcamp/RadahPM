@@ -42,6 +42,19 @@ export const stageLabel = (key, vertical) =>
 export const stageIndex = (key, vertical) =>
   Math.max(0, stagesForVertical(vertical).findIndex((s) => s.key === key));
 
+// Same 4-tier role shape everywhere, relabeled per vertical (design doc
+// Section 2) — the stored role value never changes, just what it's called
+// on screen. Keyed by vertical so this is a lookup, not a chain of
+// booleans. Shared across DashboardLayout.jsx (sidebar role label) and
+// ProjectDetailPage.jsx (add-team-member dropdown) so there's one source
+// of truth instead of the same mapping drifting apart in two places.
+export const ROLE_LABELS_BY_VERTICAL = {
+  construction: { admin: "Administrator", staff: "RADAH Staff", client: "Client / Owner", trade_partner: "Trade Partner" },
+  facilities: { admin: "Administrator", staff: "Facilities Staff", client: "Tenant", trade_partner: "Vendor" },
+  projects: { admin: "Administrator", staff: "Team Member", client: "Stakeholder", trade_partner: "Contributor" },
+};
+export const roleLabelsForVertical = (vertical) => ROLE_LABELS_BY_VERTICAL[vertical] || ROLE_LABELS_BY_VERTICAL.construction;
+
 // ---- Project tab organization ----
 // Tabs are grouped into consistent buckets (same on every project — nothing is
 // ever hidden by stage). The current stage only HIGHLIGHTS the most relevant
