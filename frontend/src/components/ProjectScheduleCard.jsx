@@ -8,6 +8,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { api } from "../api/client";
+import { useAuth } from "../context/AuthContext.jsx";
 
 function formatSize(bytes) {
   if (!bytes && bytes !== 0) return "";
@@ -17,6 +18,7 @@ function formatSize(bytes) {
 }
 
 export default function ProjectScheduleCard({ projectId, onView }) {
+  const { user } = useAuth();
   const fileRef = useRef(null);
   const [schedules, setSchedules] = useState([]);
   const [canManage, setCanManage] = useState(false);
@@ -87,7 +89,9 @@ export default function ProjectScheduleCard({ projectId, onView }) {
         <div>
           <h3 style={{ fontSize: "1rem", textTransform: "uppercase" }}>Project Schedule</h3>
           <p className="text-sm text-steel" style={{ marginTop: 2 }}>
-            The issued schedule (from P6, MS Project, or a PDF). Newest revision is current.
+            {user.orgVertical === "projects"
+              ? "The current schedule or timeline document (spreadsheet, PDF, or any file). Newest revision is current."
+              : "The issued schedule (from P6, MS Project, or a PDF). Newest revision is current."}
           </p>
         </div>
         {canManage && (

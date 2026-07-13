@@ -254,7 +254,7 @@ export default function ProjectsPage() {
                       title={isInternal ? "Set project photo" : undefined}>
                     <ProjectThumb project={p} />
                   </td>
-                  <td><strong>{p.name}</strong><div className="text-sm text-steel" style={{ marginTop: 2 }}>Stage: {stageLabel(p.stage)}</div></td>
+                  <td><strong>{p.name}</strong><div className="text-sm text-steel" style={{ marginTop: 2 }}>Stage: {stageLabel(p.stage, user.orgVertical)}</div></td>
                   <td>{p.clientOrgName || "—"}</td>
                   <td><span className={`badge badge-${p.status}`}>{p.status.replace("_", " ")}</span></td>
                   <td>{p.startDate ? new Date(p.startDate).toLocaleDateString() : "—"}</td>

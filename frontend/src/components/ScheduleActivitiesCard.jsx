@@ -13,6 +13,7 @@
 
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
+import { useAuth } from "../context/AuthContext.jsx";
 import ScheduleImportModal from "./ScheduleImportModal.jsx";
 
 const DAY = 86400000;
@@ -20,6 +21,7 @@ const d = (iso) => (iso ? new Date(`${String(iso).slice(0, 10)}T00:00:00`) : nul
 const fmt = (iso) => (iso ? d(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—");
 
 export default function ScheduleActivitiesCard({ projectId }) {
+  const { user } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -104,8 +106,9 @@ export default function ScheduleActivitiesCard({ projectId }) {
         <div className="empty-state" style={{ padding: "1.6rem 1rem" }}>
           <h3>No activities imported</h3>
           <p className="text-sm">
-            Export from MS Project (File → Save As → XML) or export a spreadsheet from P6, then import it here.
-            The schedule stays read-only — MangoDoe doesn't calculate a critical path.
+            {user.orgVertical === "projects"
+              ? "Export a spreadsheet with task names and dates, then import it here. The schedule stays read-only — MangoDoe doesn't recalculate dates for you."
+              : "Export from MS Project (File → Save As → XML) or export a spreadsheet from P6, then import it here. The schedule stays read-only — MangoDoe doesn't calculate a critical path."}
           </p>
         </div>
       ) : (

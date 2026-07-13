@@ -21,11 +21,14 @@ import TrashTab from "../components/TrashTab.jsx";
 import LogsTab from "../components/LogsTab.jsx";
 import ReportsTab from "../components/ReportsTab.jsx";
 import DocumentViewerModal from "../components/DocumentViewerModal.jsx";
-import { STAGES, stageIndex, TAB_GROUPS, TAB_LABELS, isStageRelevant } from "../config.js";
+import { stagesForVertical, stageIndex, TAB_GROUPS, TAB_LABELS, isStageRelevant } from "../config.js";
 
 // Horizontal lifecycle stage tracker. Admin/staff can advance/step back.
-function StageStepper({ project, canEdit, onChange }) {
-  const idx = stageIndex(project.stage);
+// Same underlying stage keys everywhere; stages/vertical control only the
+// labels shown (see config.js — same "same shape, relabeled" pattern used
+// for roles and nav elsewhere in this app).
+function StageStepper({ project, stages, vertical, canEdit, onChange }) {
+  const idx = stageIndex(project.stage, vertical);
   const [busy, setBusy] = useState(false);
   async function setStage(key) {
     if (busy) return;
@@ -41,13 +44,13 @@ function StageStepper({ project, canEdit, onChange }) {
         <span className="text-sm text-steel" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Project Stage</span>
         {canEdit && (
           <div style={{ display: "flex", gap: "0.4rem" }}>
-            <button className="btn btn-outline btn-sm" disabled={busy || idx === 0} onClick={() => setStage(STAGES[idx - 1].key)}>← Back</button>
-            <button className="btn btn-gold btn-sm" disabled={busy || idx >= STAGES.length - 1} onClick={() => setStage(STAGES[idx + 1].key)}>Advance →</button>
+            <button className="btn btn-outline btn-sm" disabled={busy || idx === 0} onClick={() => setStage(stages[idx - 1].key)}>← Back</button>
+            <button className="btn btn-gold btn-sm" disabled={busy || idx >= stages.length - 1} onClick={() => setStage(stages[idx + 1].key)}>Advance →</button>
           </div>
         )}
       </div>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 0, overflowX: "auto" }}>
-        {STAGES.map((s, i) => {
+        {stages.map((s, i) => {
           const done = i < idx, current = i === idx;
           const dot = done ? "var(--green-deep, #2E9E5B)" : current ? "var(--gold, #C9A227)" : "var(--line, #E2E1DA)";
           const txt = current ? "var(--navy, #0B1F3A)" : done ? "var(--green-deep, #2E9E5B)" : "var(--steel, #6b7280)";
@@ -335,7 +338,7 @@ export default function ProjectDetailPage() {
 
       {project.description && <p className="text-steel mt-1" style={{ marginBottom: "1.4rem" }}>{project.description}</p>}
 
-      <StageStepper project={project} canEdit={isInternal} onChange={(p) => setProject(p)} />
+      <StageStepper project={project} stages={stagesForVertical(user.orgVertical)} vertical={user.orgVertical} canEdit={isInternal} onChange={(p) => setProject(p)} />
 
       {(() => {
         // A tab is visible if its module is on and the role allows it.
@@ -366,7 +369,7 @@ export default function ProjectDetailPage() {
                   </span>
                   <div className="tab-row" style={{ marginBottom: 0, borderBottom: "none", flex: 1 }}>
                     {visible.map((key) => {
-                      const relevant = isStageRelevant(project.stage, key);
+                      const relevant = isStageRelevant(project.stage, key, user.orgVertical);
                       return (
                         <button
                           key={key}
@@ -474,8 +477,9 @@ export default function ProjectDetailPage() {
           <div className="card">
             <h3 style={{ fontSize: "1rem", textTransform: "uppercase", marginBottom: "0.3rem" }}>Phases</h3>
             <p className="text-sm text-steel" style={{ marginBottom: "0.9rem" }}>
-              High-level buckets used to group tasks on the timeline (e.g. Sitework, Framing, Finishes).
-              These are not a CPM schedule — the issued schedule lives above.
+              {user.orgVertical === "projects"
+                ? "High-level buckets used to group tasks on the timeline (e.g. Discovery, Design, Build, Launch). These aren't a full project plan — the uploaded schedule lives above."
+                : "High-level buckets used to group tasks on the timeline (e.g. Sitework, Framing, Finishes). These are not a CPM schedule — the issued schedule lives above."}
             </p>
             {isInternal && <AddPhaseInline projectId={id} onAdded={(p) => setPhases((prev) => [...prev, p])} />}
             {phases.length === 0 ? (

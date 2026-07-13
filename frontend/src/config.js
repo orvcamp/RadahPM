@@ -7,18 +7,40 @@
 export const APP_NAME = import.meta.env.VITE_APP_NAME || "MangoDoe";
 export const APP_TAGLINE = import.meta.env.VITE_APP_TAGLINE || "Ripe Insights | Real Results";
 
-// Project lifecycle stages (visible status tracker).
-export const STAGES = [
-  { key: "lead", label: "Lead" },
-  { key: "preconstruction", label: "Preconstruction" },
-  { key: "mobilization", label: "Mobilization" },
-  { key: "construction", label: "Construction" },
-  { key: "substantial_completion", label: "Substantial Completion" },
-  { key: "closeout", label: "Closeout" },
-  { key: "complete", label: "Complete" },
-];
-export const stageLabel = (key) => (STAGES.find((s) => s.key === key) || { label: key || "Lead" }).label;
-export const stageIndex = (key) => Math.max(0, STAGES.findIndex((s) => s.key === key));
+// Project lifecycle stages (visible status tracker). Same underlying keys
+// across every vertical — the backend validates project.stage against a
+// fixed whitelist (routes/projects.js STAGE_KEYS), so these are relabeled
+// per vertical here rather than given different stored values, the same
+// "same shape, relabeled" pattern used for roles (ROLE_LABELS_BY_VERTICAL
+// in DashboardLayout.jsx) and nav (NavForVertical).
+export const STAGES_BY_VERTICAL = {
+  construction: [
+    { key: "lead", label: "Lead" },
+    { key: "preconstruction", label: "Preconstruction" },
+    { key: "mobilization", label: "Mobilization" },
+    { key: "construction", label: "Construction" },
+    { key: "substantial_completion", label: "Substantial Completion" },
+    { key: "closeout", label: "Closeout" },
+    { key: "complete", label: "Complete" },
+  ],
+  projects: [
+    { key: "lead", label: "Lead" },
+    { key: "preconstruction", label: "Kickoff" },
+    { key: "mobilization", label: "Planning" },
+    { key: "construction", label: "In Progress" },
+    { key: "substantial_completion", label: "Review" },
+    { key: "closeout", label: "Delivery" },
+    { key: "complete", label: "Closed" },
+  ],
+};
+// Construction is the default/fallback — matches every other vertical
+// fallback throughout the app (org.vertical defaults to 'construction').
+export const STAGES = STAGES_BY_VERTICAL.construction;
+export const stagesForVertical = (vertical) => STAGES_BY_VERTICAL[vertical] || STAGES_BY_VERTICAL.construction;
+export const stageLabel = (key, vertical) =>
+  (stagesForVertical(vertical).find((s) => s.key === key) || { label: key || "Lead" }).label;
+export const stageIndex = (key, vertical) =>
+  Math.max(0, stagesForVertical(vertical).findIndex((s) => s.key === key));
 
 // ---- Project tab organization ----
 // Tabs are grouped into consistent buckets (same on every project — nothing is
@@ -53,16 +75,31 @@ export const TAB_LABELS = {
 };
 
 // Which tabs are most relevant at each stage (highlight only — never hides).
-export const STAGE_RELEVANT_TABS = {
-  lead: ["timeline", "tasks", "team", "documents"],
-  // "logs" is relevant once work is planned and running
-
-  preconstruction: ["logs", "phases", "budget", "rfis", "submittals", "documents"],
-  mobilization: ["logs", "phases", "team", "submittals", "documents"],
-  construction: ["logs", "dailylogs", "rfis", "submittals", "changeorders", "budget", "billing"],
-  substantial_completion: ["logs", "changeorders", "budget", "billing", "documents", "dailylogs"],
-  closeout: ["logs", "documents", "budget", "changeorders", "billing", "reports"],
-  complete: ["documents", "budget", "reports"],
+// Two separate maps because the tabs that exist at all differ by vertical
+// (a Projects org has no rfis/billing/dailylogs to ever highlight).
+export const STAGE_RELEVANT_TABS_BY_VERTICAL = {
+  construction: {
+    lead: ["timeline", "tasks", "team", "documents"],
+    // "logs" is relevant once work is planned and running
+    preconstruction: ["logs", "phases", "budget", "rfis", "submittals", "documents"],
+    mobilization: ["logs", "phases", "team", "submittals", "documents"],
+    construction: ["logs", "dailylogs", "rfis", "submittals", "changeorders", "budget", "billing"],
+    substantial_completion: ["logs", "changeorders", "budget", "billing", "documents", "dailylogs"],
+    closeout: ["logs", "documents", "budget", "changeorders", "billing", "reports"],
+    complete: ["documents", "budget", "reports"],
+  },
+  projects: {
+    lead: ["timeline", "tasks", "team", "documents"],
+    preconstruction: ["tasks", "phases", "team", "documents", "approvals"],
+    mobilization: ["tasks", "phases", "budget", "timetracking", "documents"],
+    construction: ["tasks", "phases", "timetracking", "approvals", "budget"],
+    substantial_completion: ["approvals", "timetracking", "budget", "documents"],
+    closeout: ["documents", "budget", "reports", "approvals"],
+    complete: ["documents", "budget", "reports"],
+  },
 };
-export const isStageRelevant = (stage, tabKey) =>
-  (STAGE_RELEVANT_TABS[stage || "lead"] || []).includes(tabKey);
+export const STAGE_RELEVANT_TABS = STAGE_RELEVANT_TABS_BY_VERTICAL.construction;
+export const isStageRelevant = (stage, tabKey, vertical) => {
+  const map = STAGE_RELEVANT_TABS_BY_VERTICAL[vertical] || STAGE_RELEVANT_TABS_BY_VERTICAL.construction;
+  return (map[stage || "lead"] || []).includes(tabKey);
+};

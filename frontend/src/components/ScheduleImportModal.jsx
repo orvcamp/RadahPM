@@ -11,6 +11,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
+import { useAuth } from "../context/AuthContext.jsx";
 import { readWorkbook, sheetToRows, parseDateToISO, daysBetween, parseNumber, parseMsProjectXml } from "../lib/sheetjs.js";
 
 const inputStyle = { width: "100%", border: "1.5px solid var(--line)", borderRadius: 6, padding: "0.5rem 0.7rem", fontSize: "0.85rem" };
@@ -35,6 +36,7 @@ const GUESS = {
 };
 
 export default function ScheduleImportModal({ projectId, existingCount, onClose, onImported }) {
+  const { user } = useAuth();
   const fileRef = useRef(null);
   const [fileName, setFileName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -188,7 +190,9 @@ export default function ScheduleImportModal({ projectId, existingCount, onClose,
               {!fileName && (
                 <p className="text-sm text-steel" style={{ marginTop: "0.5rem" }}>
                   <strong>MS Project:</strong> File → Save As → XML (.xml) — parsed automatically.<br />
-                  <strong>Primavera P6 or anything else:</strong> export a spreadsheet (.xlsx / .csv) and map the columns.<br />
+                  {user.orgVertical === "projects"
+                    ? <><strong>Any other tool:</strong> export a spreadsheet (.xlsx / .csv) and map the columns.<br /></>
+                    : <><strong>Primavera P6 or anything else:</strong> export a spreadsheet (.xlsx / .csv) and map the columns.<br /></>}
                   Read in your browser; the file isn't uploaded.
                 </p>
               )}
