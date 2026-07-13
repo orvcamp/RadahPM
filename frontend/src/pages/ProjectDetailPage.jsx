@@ -172,7 +172,11 @@ function DeleteProjectModal({ projectId, projectName, onClose, onDeleted }) {
   }, [projectId]);
 
   const counts = preview ? Object.entries(preview.willPermanentlyDelete).filter(([, n]) => n > 0) : [];
-  const canDelete = confirmText.trim().toLowerCase() === projectName.toLowerCase();
+  // Strip everything but letters/numbers before comparing — case, dashes
+  // (regular vs en-dash), and stray whitespace all stop mattering. The
+  // point of "type to confirm" is proving intent, not exact keystrokes.
+  const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const canDelete = normalize(confirmText) === normalize(projectName) && normalize(confirmText).length > 0;
 
   async function handleDelete() {
     setDeleting(true);
