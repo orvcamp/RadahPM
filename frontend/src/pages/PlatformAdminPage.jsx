@@ -15,7 +15,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 
 const VERTICALS = [
   { key: "construction", label: "Construction" },
-  { key: "projects", label: "Projects" },
+  { key: "projects", label: "Projects", disabled: true },
   { key: "facilities", label: "Facilities" },
 ];
 const VERTICAL_LABEL = Object.fromEntries(VERTICALS.map((v) => [v.key, v.label]));
@@ -183,7 +183,11 @@ export default function PlatformAdminPage() {
             <div>
               <label className="text-sm text-steel">Vertical</label>
               <select value={form.vertical} onChange={(e) => setForm((f) => ({ ...f, vertical: e.target.value }))} style={inputStyle}>
-                {VERTICALS.map((v) => <option key={v.key} value={v.key}>{v.label}</option>)}
+                {VERTICALS.map((v) => (
+                  <option key={v.key} value={v.key} disabled={v.disabled}>
+                    {v.label}{v.disabled ? " (not yet available)" : ""}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
