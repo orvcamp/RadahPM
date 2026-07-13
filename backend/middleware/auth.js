@@ -55,6 +55,18 @@ async function revokeUserSessions(userId, runner = pool) {
 }
 
 /**
+ * Org-wide equivalent of revokeUserSessions — bumps token_version for every
+ * user in the org at once. Used when suspending an organization: the login
+ * check alone only blocks NEW sign-ins, this immediately ends sessions
+ * already in progress too, the same way a single password reset does for
+ * one user.
+ */
+async function revokeOrgSessions(orgId, runner = pool) {
+  const r = await runner.query("UPDATE users SET token_version = token_version + 1 WHERE org_id = $1 RETURNING id", [orgId]);
+  for (const row of r.rows) invalidateUserCache(row.id);
+}
+
+/**
  * Verifies the Bearer token, then confirms the account is still active and the
  * token hasn't been revoked. Attaches the decoded payload to req.user.
  */
@@ -148,6 +160,7 @@ module.exports = {
   requireOrg,
   requirePlatformAdmin,
   revokeUserSessions,
+  revokeOrgSessions,
   invalidateUserCache,
   JWT_SECRET,
 };

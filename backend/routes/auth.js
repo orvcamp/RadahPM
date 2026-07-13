@@ -59,7 +59,7 @@ router.post("/login", loginLimiter, async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT u.*, o.vertical AS org_vertical FROM users u
+      `SELECT u.*, o.vertical AS org_vertical, o.is_active AS org_is_active FROM users u
        LEFT JOIN organizations o ON o.id = u.org_id
        WHERE u.email = $1 AND u.is_active = TRUE`,
       [email.toLowerCase().trim()]
@@ -73,6 +73,12 @@ router.post("/login", loginLimiter, async (req, res) => {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
       return res.status(401).json({ error: "Invalid email or password." });
+    }
+
+    // A platform admin isn't scoped to one org's active/suspended state.
+    // Every regular tenant user is blocked if their org has been suspended.
+    if (!user.is_platform_admin && user.org_is_active === false) {
+      return res.status(403).json({ error: "Your organization's account has been suspended. Contact support if you believe this is an error." });
     }
 
     // Successful sign-in clears this IP+email's failed-attempt counter.
@@ -257,3 +263,4 @@ router.post("/reset-password", resetPasswordLimiter, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.signToken = signToken;

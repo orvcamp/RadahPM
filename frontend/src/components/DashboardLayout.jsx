@@ -4,6 +4,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { APP_NAME, APP_TAGLINE } from "../config.js";
 import NotificationBell from "./NotificationBell.jsx";
+import ImpersonationBanner from "./ImpersonationBanner.jsx";
 
 const ROLE_LABELS = {
   admin: "Administrator",
@@ -27,7 +28,9 @@ export default function DashboardLayout() {
   const isFacilities = user.orgVertical === "facilities";
 
   return (
-    <div className="app-shell">
+    <>
+      <ImpersonationBanner />
+      <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-logo">
           <svg width="28" height="28" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -86,6 +89,7 @@ export default function DashboardLayout() {
         </div>
         <Outlet />
       </main>
-    </div>
+      </div>
+    </>
   );
 }
