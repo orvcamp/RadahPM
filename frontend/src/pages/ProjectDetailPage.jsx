@@ -13,6 +13,8 @@ import BillingTab from "../components/BillingTab.jsx";
 import DailyLogsTab from "../components/DailyLogsTab.jsx";
 import RfisTab from "../components/RfisTab.jsx";
 import SubmittalsTab from "../components/SubmittalsTab.jsx";
+import ApprovalsTab from "../components/ApprovalsTab.jsx";
+import TimeTrackingTab from "../components/TimeTrackingTab.jsx";
 import ProjectScheduleCard from "../components/ProjectScheduleCard.jsx";
 import ScheduleActivitiesCard from "../components/ScheduleActivitiesCard.jsx";
 import TrashTab from "../components/TrashTab.jsx";
@@ -263,6 +265,8 @@ export default function ProjectDetailPage() {
           if (key === "budget") return user.role !== "trade_partner" && modOn("budget");
           if (key === "changeorders") return user.role !== "trade_partner" && modOn("changeorders");
           if (key === "billing") return user.role !== "trade_partner" && modOn("billing");
+          if (key === "timetracking") return modOn("time_tracking");
+          if (key === "approvals") return modOn("approvals");
           if (key === "dailylogs") return modOn("dailylogs");
           if (key === "rfis") return modOn("rfis");
           if (key === "submittals") return modOn("submittals");
@@ -447,6 +451,10 @@ export default function ProjectDetailPage() {
       {tab === "changeorders" && user.role !== "trade_partner" && modOn("changeorders") && <ChangeOrdersTab projectId={id} />}
 
       {tab === "billing" && user.role !== "trade_partner" && modOn("billing") && <BillingTab projectId={id} />}
+
+      {tab === "timetracking" && modOn("time_tracking") && <TimeTrackingTab projectId={id} />}
+
+      {tab === "approvals" && modOn("approvals") && <ApprovalsTab projectId={id} />}
 
       {tab === "dailylogs" && modOn("dailylogs") && <DailyLogsTab projectId={id} />}
 

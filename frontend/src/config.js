@@ -26,9 +26,9 @@ export const stageIndex = (key) => Math.max(0, STAGES.findIndex((s) => s.key ===
 // tabs, so live records are never orphaned behind a hidden tab.
 // Future modules slot in here: Billing -> "cost", Punch List/Reports -> "field".
 export const TAB_GROUPS = [
-  { key: "overview",  label: "Overview",  tabs: ["timeline", "tasks", "phases", "team", "logs", "trash"] },
+  { key: "overview",  label: "Overview",  tabs: ["timeline", "tasks", "phases", "team", "approvals", "logs", "trash"] },
   { key: "documents", label: "Documents", tabs: ["documents"] },
-  { key: "cost",      label: "Cost",      tabs: ["budget", "changeorders", "billing"] },
+  { key: "cost",      label: "Cost",      tabs: ["budget", "changeorders", "billing", "timetracking"] },
   { key: "field",     label: "Field",     tabs: ["dailylogs", "rfis", "submittals"] },
   { key: "reports",   label: "Reports",   tabs: ["reports"] },
 ];
@@ -38,10 +38,12 @@ export const TAB_LABELS = {
   tasks: "Tasks",
   phases: "Schedule",
   team: "Team",
+  approvals: "Approvals",
   documents: "Documents",
   budget: "Budget",
   changeorders: "Change Orders",
   billing: "Billing",
+  timetracking: "Time Tracking",
   dailylogs: "Daily Logs",
   rfis: "RFIs",
   submittals: "Submittals",
