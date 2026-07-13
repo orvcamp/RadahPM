@@ -56,6 +56,7 @@ async function migrate() {
     await runSqlFile("migrations_phase4_folder_dedupe.sql", "Migration (dedupe folders + prevent recurrence)");
     await runSqlFile("migrations_phase5_platform_core.sql", "Phase 5 migration (multi-vertical core: org vertical, folder templates, workflow statuses)");
     await runSqlFile("migrations_phase6_facilities.sql", "Phase 6 migration (MangoDoe Facilities: properties, assets, work orders, PM schedules, vendors, inspections)");
+    await runSqlFile("migrations_phase7_projects.sql", "Phase 7 migration (MangoDoe Projects: time entries, approval requests, folder template)");
   } finally {
     await pool.end();
   }

@@ -401,4 +401,87 @@ router.post("/tasks/:id/comments", requireAuth, async (req, res) => {
   }
 });
 
+// ============================================================
+// TASK DEPENDENCIES
+// The task_dependencies table already existed (originally for
+// Construction's Gantt "finish-to-start" links) but had no REST routes.
+// Exposing it generically here — task_id depends on depends_on_task_id
+// finishing first — works the same for a Kanban "blocked by" indicator as
+// it does for a Gantt link; it's the same underlying relationship.
+// ============================================================
+
+router.get("/tasks/:id/dependencies", requireAuth, guardResource("tasks"), async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT d.id, d.depends_on_task_id, t.title, t.status
+         FROM task_dependencies d JOIN tasks t ON t.id = d.depends_on_task_id
+        WHERE d.task_id = $1`,
+      [req.params.id]
+    );
+    res.json({
+      dependencies: r.rows.map((row) => ({
+        id: row.id,
+        dependsOnTaskId: row.depends_on_task_id,
+        dependsOnTitle: row.title,
+        dependsOnStatus: row.status,
+      })),
+    });
+  } catch (err) {
+    console.error("[radah-pm] list task dependencies error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
+router.post(
+  "/tasks/:id/dependencies",
+  requireAuth,
+  requireRole("admin", "staff"),
+  guardResource("tasks"),
+  async (req, res) => {
+    const { dependsOnTaskId } = req.body || {};
+    if (!dependsOnTaskId) return res.status(400).json({ error: "dependsOnTaskId is required." });
+    if (dependsOnTaskId === req.params.id) {
+      return res.status(400).json({ error: "A task cannot depend on itself." });
+    }
+    try {
+      // Both tasks must be in the same project — a dependency spanning
+      // projects wouldn't mean anything, and could leak visibility across
+      // an org-isolation boundary.
+      const taskRes = await pool.query("SELECT project_id FROM tasks WHERE id = $1", [req.params.id]);
+      const dependsOnRes = await pool.query("SELECT project_id FROM tasks WHERE id = $1", [dependsOnTaskId]);
+      if (!taskRes.rows[0] || !dependsOnRes.rows[0]) {
+        return res.status(404).json({ error: "One of these tasks was not found." });
+      }
+      if (taskRes.rows[0].project_id !== dependsOnRes.rows[0].project_id) {
+        return res.status(400).json({ error: "Both tasks must be in the same project." });
+      }
+      const r = await pool.query(
+        `INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES ($1, $2)
+         ON CONFLICT (task_id, depends_on_task_id) DO NOTHING RETURNING id`,
+        [req.params.id, dependsOnTaskId]
+      );
+      res.status(201).json({ id: r.rows[0] ? r.rows[0].id : null, message: "Dependency added." });
+    } catch (err) {
+      console.error("[radah-pm] add task dependency error:", err);
+      res.status(500).json({ error: "Something went wrong." });
+    }
+  }
+);
+
+router.delete(
+  "/tasks/:id/dependencies/:depId",
+  requireAuth,
+  requireRole("admin", "staff"),
+  guardResource("tasks"),
+  async (req, res) => {
+    try {
+      await pool.query("DELETE FROM task_dependencies WHERE id = $1 AND task_id = $2", [req.params.depId, req.params.id]);
+      res.json({ message: "Dependency removed." });
+    } catch (err) {
+      console.error("[radah-pm] remove task dependency error:", err);
+      res.status(500).json({ error: "Something went wrong." });
+    }
+  }
+);
+
 module.exports = router;

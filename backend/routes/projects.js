@@ -428,6 +428,8 @@ const RESOURCE_TABLES = new Set([
   "rfis",
   "submittals",
   "project_logs",
+  "time_entries",
+  "approval_requests",
 ]);
 async function resourceProjectId(table, id) {
   if (!RESOURCE_TABLES.has(table)) throw new Error("resourceProjectId: table not allowed");

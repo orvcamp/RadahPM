@@ -175,7 +175,14 @@ export default function ProjectDetailPage() {
     api.get("/my-modules").then((d) => setModules(d.modules)).catch(() => setModules(null));
   }, []);
   // default-show a module unless we know it's disabled
-  const modOn = (key) => !modules || modules[key] !== false;
+  // While modules is still loading (null), default open briefly to avoid a
+  // flicker for existing, valid modules. Once loaded, a key must be
+  // explicitly true to count as on — a key absent from the map (a module
+  // that doesn't apply to this org's vertical at all) or explicitly false
+  // (disabled by a platform admin) are both correctly treated as off. This
+  // matters once a vertical exists with zero registered modules — see the
+  // MangoDoe Enterprise design doc, Section 7, "fails open, not closed."
+  const modOn = (key) => !key || !modules || modules[key] === true;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [taskModal, setTaskModal] = useState(null); // null | {} (new) | task (edit)

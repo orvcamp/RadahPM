@@ -6,28 +6,31 @@
 //
 // Each module also carries a `verticals` tag — which of the platform's
 // products (construction | projects | facilities, per the MangoDoe
-// Enterprise design doc) it applies to. Today only "construction" exists,
-// so every module below is tagged accurately as construction-only; the
-// Projects and Facilities verticals add their own module entries with
-// their own tags when those are built, without needing to touch this
-// filtering logic. A module can list more than one vertical if it's a
-// shared engine (Budget, Documents, Reports, Billing all end up shared —
-// see Section 0 of the design doc) once those verticals actually exist.
+// Enterprise design doc) it applies to. A module can list more than one
+// vertical if it's a shared engine (Documents, Budget, Reports — see
+// Section 0 of the design doc). getOrgModules() below filters to only the
+// modules tagged for an org's vertical — a vertical with zero tagged
+// modules (there isn't one anymore as of Phase 7, but there was between
+// Phase 5 and Phase 7) must resolve to an empty map, not "everything on";
+// see the fail-open bug documented in the design doc, Section 7, and the
+// corresponding fix in modOn() on the frontend.
 
 const pool = require("./db/pool");
 
 // The toggleable capability modules (core PM — projects/tasks/phases/team —
-// is always on and not listed here).
+// is always on and not listed here; Tasks specifically is core PM too,
+// not a toggleable module, since it predates the module system and was
+// never gated — see the Phase 7 migration notes).
 const MODULES = [
   // Shared engines — apply to more than one vertical now that Facilities
-  // (Phase 6) actually exists. Billing/Change Orders/RFIs/Submittals/Daily
-  // Logs stay construction-only for now: Facilities' "Capital Projects"
-  // module (design doc Section 2, module 08) deliberately reuses those
-  // outright rather than needing its own tag — that's an explicit reuse
-  // decision for later, not an automatic one.
-  { key: "documents", label: "Documents", verticals: ["construction", "facilities"] },
-  { key: "budget", label: "Budget & Cost", verticals: ["construction", "facilities"] },
-  { key: "reports", label: "Reports", verticals: ["construction", "facilities"] },
+  // (Phase 6) and Projects (Phase 7) both exist. Billing/Change
+  // Orders/RFIs/Submittals/Daily Logs stay construction-only: Facilities'
+  // "Capital Projects" module deliberately reuses those outright rather
+  // than needing its own tag — that's an explicit reuse decision, not an
+  // automatic one.
+  { key: "documents", label: "Documents", verticals: ["construction", "facilities", "projects"] },
+  { key: "budget", label: "Budget & Cost", verticals: ["construction", "facilities", "projects"] },
+  { key: "reports", label: "Reports", verticals: ["construction", "facilities", "projects"] },
   // Construction-only
   { key: "changeorders", label: "Change Orders", verticals: ["construction"] },
   { key: "dailylogs", label: "Daily Logs", verticals: ["construction"] },
@@ -41,6 +44,9 @@ const MODULES = [
   { key: "pm_scheduling", label: "Preventive Maintenance", verticals: ["facilities"] },
   { key: "vendors", label: "Vendors & Contracts", verticals: ["facilities"] },
   { key: "inspections", label: "Inspections & Compliance", verticals: ["facilities"] },
+  // Projects-only (Phase 7)
+  { key: "approvals", label: "Approvals", verticals: ["projects"] },
+  { key: "time_tracking", label: "Time Tracking", verticals: ["projects"] },
 ];
 const MODULE_KEYS = MODULES.map((m) => m.key);
 

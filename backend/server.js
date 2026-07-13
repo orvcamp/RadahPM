@@ -29,6 +29,8 @@ const propertyRoutes = require("./routes/properties"); // MangoDoe Facilities: P
 const workOrderRoutes = require("./routes/workorders"); // MangoDoe Facilities: Work Orders & PM Schedules
 const vendorRoutes = require("./routes/vendors"); // MangoDoe Facilities: Vendors & Contracts
 const inspectionRoutes = require("./routes/inspections"); // MangoDoe Facilities: Inspections & Compliance
+const timeEntryRoutes = require("./routes/timeentries"); // MangoDoe Projects: Time Tracking
+const approvalRoutes = require("./routes/approvals"); // MangoDoe Projects: Approvals
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -84,6 +86,8 @@ app.use("/api", propertyRoutes); // Facilities: Properties (/api/properties) & A
 app.use("/api", workOrderRoutes); // Facilities: Work Orders & PM Schedules
 app.use("/api", vendorRoutes); // Facilities: Vendors (/api/vendors) & Vendor Contracts
 app.use("/api", inspectionRoutes); // Facilities: Inspections & Compliance
+app.use("/api", timeEntryRoutes); // Projects: Time Tracking
+app.use("/api", approvalRoutes); // Projects: Approvals
 
 // 404 handler
 app.use((req, res) => {

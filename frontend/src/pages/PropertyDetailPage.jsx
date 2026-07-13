@@ -113,7 +113,8 @@ export default function PropertyDetailPage() {
   useEffect(() => {
     api.get("/my-modules").then((d) => setModules(d.modules)).catch(() => setModules(null));
   }, []);
-  const modOn = (key) => !key || !modules || modules[key] !== false;
+  // See the matching comment in ProjectDetailPage.jsx — same fail-closed fix.
+  const modOn = (key) => !key || !modules || modules[key] === true;
 
   useEffect(() => {
     setLoading(true);
