@@ -172,7 +172,7 @@ function DeleteProjectModal({ projectId, projectName, onClose, onDeleted }) {
   }, [projectId]);
 
   const counts = preview ? Object.entries(preview.willPermanentlyDelete).filter(([, n]) => n > 0) : [];
-  const canDelete = confirmText.trim() === projectName;
+  const canDelete = confirmText.trim().toLowerCase() === projectName.toLowerCase();
 
   async function handleDelete() {
     setDeleting(true);

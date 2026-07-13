@@ -113,7 +113,7 @@ function DeleteUserModal({ user, onClose, onDeleted }) {
   }, [user.id]);
 
   const counts = preview ? Object.entries(preview.willPermanentlyDelete).filter(([, n]) => n > 0) : [];
-  const canDelete = confirmText.trim() === user.fullName;
+  const canDelete = confirmText.trim().toLowerCase() === user.fullName.toLowerCase();
 
   async function handleDelete() {
     setDeleting(true);
