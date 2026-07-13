@@ -426,12 +426,14 @@ export default function ReportsTab({ projectId }) {
   const [to, setTo] = useState("");
 
   // Which report types this org actually has (vertical + enabled modules).
-  // Falls back to the Construction list on failure, so nothing regresses
-  // if this endpoint is ever unreachable.
+  // A successful fetch is trusted even if it comes back empty (that's a
+  // real state — no reports available yet for this vertical) — only a
+  // failed *fetch* falls back to the Construction list, so nothing
+  // regresses if this endpoint is ever unreachable.
   useEffect(() => {
     api.get("/reports/types")
       .then((d) => {
-        if (Array.isArray(d.types) && d.types.length > 0) {
+        if (Array.isArray(d.types)) {
           setAvailableTypes(d.types.map((t) => ({ key: t.key, label: t.title })));
         }
       })

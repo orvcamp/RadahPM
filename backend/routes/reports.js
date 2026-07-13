@@ -356,8 +356,8 @@ async function getDailyLogRollup(projectId, from, to) {
 // this is metadata for the future Projects/Facilities report types to slot
 // alongside, not a behavior change.
 const REPORT_REGISTRY = [
-  { key: "status-summary", title: "Project Status Summary", module: "reports", verticals: ["construction"] },
-  { key: "budget-vs-actual", title: "Budget vs. Actual", module: "budget", verticals: ["construction"] },
+  { key: "status-summary", title: "Project Status Summary", module: "reports", verticals: ["construction", "facilities", "projects"] },
+  { key: "budget-vs-actual", title: "Budget vs. Actual", module: "budget", verticals: ["construction", "facilities", "projects"] },
   { key: "rfi-log", title: "RFI Log", module: "rfis", verticals: ["construction"] },
   { key: "submittal-log", title: "Submittal Log", module: "submittals", verticals: ["construction"] },
   { key: "daily-log-rollup", title: "Daily Log Rollup", module: "dailylogs", verticals: ["construction"] },
