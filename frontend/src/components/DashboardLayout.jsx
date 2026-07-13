@@ -1,115 +1,99 @@
-// src/components/PropertyScheduleTab.jsx
-//
-// MangoDoe Facilities — Schedule tab. Deliberately NOT a reuse of
-// Construction's ProjectScheduleCard/ScheduleActivitiesCard — those are
-// about uploading and importing an external CPM schedule file (P6, MS
-// Project), a workflow that has no equivalent in facilities operations.
-// What a facilities manager actually means by "what's on the schedule" is
-// a unified, date-sorted view across the three things that already carry
-// dates on a Property: PM Schedules (next_due_date), Work Orders
-// (scheduledDate), and Inspections (scheduledDate) — none of which had a
-// single place to see them together, chronologically, before this.
+// src/components/DashboardLayout.jsx
 
-import { useEffect, useState } from "react";
-import { api } from "../api/client";
+import { NavLink, Outlet } from "react-router-dom";
+import { useAuth } from "../context/AuthContext.jsx";
+import { APP_NAME, APP_TAGLINE } from "../config.js";
+import NotificationBell from "./NotificationBell.jsx";
+import ImpersonationBanner from "./ImpersonationBanner.jsx";
 
-function daysUntil(dateStr) {
-  const diff = (new Date(dateStr) - new Date(new Date().toDateString())) / 86400000;
-  return Math.round(diff);
+// Same 4-tier role shape everywhere, relabeled per vertical (design doc
+// Section 2) — the stored role value never changes, just what it's called
+// on screen. Keyed by vertical so this is a lookup, not a chain of
+// booleans — adding a fourth vertical later is one more entry, not a
+// rewrite (this is the same category of fix as the modOn() fail-open bug
+// documented in the design doc, Section 7 — vertical branching needs to be
+// a lookup everywhere, not a binary check).
+const ROLE_LABELS_BY_VERTICAL = {
+  construction: { admin: "Administrator", staff: "RADAH Staff", client: "Client / Owner", trade_partner: "Trade Partner" },
+  facilities: { admin: "Administrator", staff: "Facilities Staff", client: "Tenant", trade_partner: "Vendor" },
+  projects: { admin: "Administrator", staff: "Team Member", client: "Stakeholder", trade_partner: "Contributor" },
+};
+
+// Which nav item(s) a vertical gets for its root entity, and where they
+// point. Construction and Projects currently share the same /projects
+// route (both verticals' root entity is a projects table row — see the
+// design doc's Section 1 note that Projects reuses Project as-is);
+// Facilities uses its own /properties + /vendors, per Phase 6.
+function NavForVertical({ vertical }) {
+  if (vertical === "facilities") {
+    return (
+      <>
+        <NavLink to="/properties" className={({ isActive }) => (isActive ? "active" : "")}>Properties</NavLink>
+        <NavLink to="/vendors" className={({ isActive }) => (isActive ? "active" : "")}>Vendors</NavLink>
+      </>
+    );
+  }
+  // construction and projects both land here today.
+  return <NavLink to="/projects" className={({ isActive }) => (isActive ? "active" : "")}>Projects</NavLink>;
 }
-function urgency(dateStr, isDone) {
-  if (isDone) return "done";
-  const d = daysUntil(dateStr);
-  if (d < 0) return "overdue";
-  if (d <= 7) return "soon";
-  return "later";
-}
-const URGENCY_BADGE = { overdue: "badge-cancelled", soon: "badge-on_hold", later: "badge-active", done: "badge-completed" };
-const URGENCY_LABEL = { overdue: "overdue", soon: "this week", later: "upcoming", done: "done" };
 
-export default function PropertyScheduleTab({ propertyId, onNavigate }) {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [filter, setFilter] = useState("all"); // all | overdue | soon
-
-  useEffect(() => {
-    setLoading(true);
-    setError("");
-    Promise.all([
-      api.get(`/properties/${propertyId}/pm-schedules`).catch(() => ({ pmSchedules: [] })),
-      api.get(`/properties/${propertyId}/work-orders`).catch(() => ({ workOrders: [] })),
-      api.get(`/properties/${propertyId}/inspections`).catch(() => ({ inspections: [] })),
-    ])
-      .then(([pm, wo, insp]) => {
-        const merged = [
-          ...(pm.pmSchedules || [])
-            .filter((s) => s.isActive !== false && s.nextDueDate)
-            .map((s) => ({ id: s.id, kind: "PM Schedule", title: s.title, date: s.nextDueDate, done: false, tab: "workorders" })),
-          ...(wo.workOrders || [])
-            .filter((w) => w.scheduledDate)
-            .map((w) => ({ id: w.id, kind: "Work Order", title: w.title, date: w.scheduledDate, done: w.status === "completed" || w.status === "cancelled", tab: "workorders" })),
-          ...(insp.inspections || [])
-            .filter((i) => i.scheduledDate)
-            .map((i) => ({ id: i.id, kind: "Inspection", title: i.title, date: i.scheduledDate, done: i.status === "completed" || i.status === "cancelled", tab: "inspections" })),
-        ];
-        merged.sort((a, b) => new Date(a.date) - new Date(b.date));
-        setItems(merged);
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [propertyId]);
-
-  if (loading) return <div className="loading-spinner" />;
-
-  const withUrgency = items.map((it) => ({ ...it, urgency: urgency(it.date, it.done) }));
-  const overdueCount = withUrgency.filter((it) => it.urgency === "overdue").length;
-  const soonCount = withUrgency.filter((it) => it.urgency === "soon").length;
-  const filtered = filter === "all" ? withUrgency : withUrgency.filter((it) => it.urgency === filter);
+export default function DashboardLayout() {
+  const { user, logout } = useAuth();
+  const isInternal = user.role === "admin" || user.role === "staff";
+  const isPlatformAdmin = !!user.isPlatformAdmin;
+  const vertical = user.orgVertical || "construction";
+  const roleLabels = ROLE_LABELS_BY_VERTICAL[vertical] || ROLE_LABELS_BY_VERTICAL.construction;
 
   return (
-    <div>
-      {error && <div className="error-msg">{error}</div>}
-
-      <div className="stat-row" style={{ gridTemplateColumns: "repeat(3, 1fr)", marginBottom: "1rem" }}>
-        <div className="stat-card"><span className="num">{overdueCount}</span><span className="label">Overdue</span></div>
-        <div className="stat-card"><span className="num">{soonCount}</span><span className="label">Due This Week</span></div>
-        <div className="stat-card"><span className="num">{items.length}</span><span className="label">Total Scheduled</span></div>
-      </div>
-
-      <div className="tab-row">
-        <button className={`tab-btn ${filter === "all" ? "active" : ""}`} onClick={() => setFilter("all")}>All</button>
-        <button className={`tab-btn ${filter === "overdue" ? "active" : ""}`} onClick={() => setFilter("overdue")}>Overdue</button>
-        <button className={`tab-btn ${filter === "soon" ? "active" : ""}`} onClick={() => setFilter("soon")}>Due This Week</button>
-      </div>
-
-      {filtered.length === 0 ? (
-        <div className="card">
-          <div className="empty-state">
-            <h3>Nothing scheduled</h3>
-            <p className="text-sm">
-              PM Schedules, Work Orders with a scheduled date, and Inspections with a scheduled date all show up here, sorted chronologically — set one up from the Work Orders or Inspections tab.
-            </p>
+    <>
+      <ImpersonationBanner />
+      <div className="app-shell">
+        <aside className="sidebar">
+          <div className="sidebar-logo">
+            <svg width="28" height="28" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="1" y="1" width="32" height="32" rx="3" stroke="#C9A227" strokeWidth="1.5" />
+              <path d="M9 24L17 8L21 16H25L17 27L13 19H9" stroke="#3DBA6E" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+            </svg>
+            <div>
+              <span className="name">{APP_NAME}</span>
+              <span className="sub">{APP_TAGLINE}</span>
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="card" style={{ padding: 0 }}>
-          <table className="data-table">
-            <thead><tr><th>Date</th><th>Type</th><th>Title</th><th>Status</th><th></th></tr></thead>
-            <tbody>
-              {filtered.map((it) => (
-                <tr key={`${it.kind}-${it.id}`} className={onNavigate ? "clickable" : undefined} onClick={() => onNavigate && onNavigate(it.tab)}>
-                  <td>{new Date(it.date).toLocaleDateString()}</td>
-                  <td>{it.kind}</td>
-                  <td><strong>{it.title}</strong></td>
-                  <td><span className={`badge ${URGENCY_BADGE[it.urgency]}`}>{URGENCY_LABEL[it.urgency]}</span></td>
-                  <td className="text-sm text-steel">{onNavigate ? `View in ${it.kind === "Inspection" ? "Inspections" : "Work Orders"} →` : ""}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+
+          <nav className="sidebar-nav">
+            <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : "")}>
+              Dashboard
+            </NavLink>
+            <NavForVertical vertical={vertical} />
+            {isInternal && (
+              <NavLink to="/users" className={({ isActive }) => (isActive ? "active" : "")}>
+                Users
+              </NavLink>
+            )}
+            {isPlatformAdmin && (
+              <NavLink to="/platform" className={({ isActive }) => (isActive ? "active" : "")}>
+                Organizations
+              </NavLink>
+            )}
+            <NavLink to="/settings" className={({ isActive }) => (isActive ? "active" : "")}>
+              Settings
+            </NavLink>
+          </nav>
+
+          <div className="sidebar-footer">
+            <div className="sidebar-user">{user.fullName}</div>
+            <div className="sidebar-role">{roleLabels[user.role] || user.role}</div>
+            <button className="logout-btn" onClick={logout}>Log Out</button>
+          </div>
+        </aside>
+
+        <main className="main-content">
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.6rem" }}>
+            <NotificationBell />
+          </div>
+          <Outlet />
+        </main>
+      </div>
+    </>
   );
 }
