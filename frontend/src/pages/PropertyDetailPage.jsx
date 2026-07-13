@@ -16,9 +16,11 @@ import AssetsTab from "../components/AssetsTab.jsx";
 import WorkOrdersTab from "../components/WorkOrdersTab.jsx";
 import VendorContractsTab from "../components/VendorContractsTab.jsx";
 import InspectionsTab from "../components/InspectionsTab.jsx";
+import PropertyScheduleTab from "../components/PropertyScheduleTab.jsx";
 
 const TABS = [
   { key: "overview", label: "Overview", module: null },
+  { key: "schedule", label: "Schedule", module: null }, // shown if any of workorders/pm_scheduling/inspections is on — see visibleTabs filter below
   { key: "assets", label: "Assets", module: "assets" },
   { key: "workorders", label: "Work Orders", module: "workorders" },
   { key: "vendorcontracts", label: "Vendor Contracts", module: "vendors" },
@@ -128,7 +130,12 @@ export default function PropertyDetailPage() {
   if (error) return <div className="error-msg">{error}</div>;
   if (!property) return null;
 
-  const visibleTabs = TABS.filter((t) => modOn(t.module) && !(t.module === "budget" && user.role === "trade_partner") && !(t.module === "reports" && user.role === "trade_partner"));
+  const visibleTabs = TABS.filter((t) =>
+    modOn(t.module)
+    && !(t.key === "schedule" && !(modOn("workorders") || modOn("pm_scheduling") || modOn("inspections")))
+    && !(t.module === "budget" && user.role === "trade_partner")
+    && !(t.module === "reports" && user.role === "trade_partner")
+  );
 
   return (
     <div>
@@ -147,6 +154,7 @@ export default function PropertyDetailPage() {
       </div>
 
       {tab === "overview" && <OverviewTab property={property} canEdit={isInternal} onSaved={setProperty} />}
+      {tab === "schedule" && <PropertyScheduleTab propertyId={id} onNavigate={setTab} />}
       {tab === "assets" && modOn("assets") && <AssetsTab propertyId={id} />}
       {tab === "workorders" && modOn("workorders") && <WorkOrdersTab propertyId={id} />}
       {tab === "vendorcontracts" && modOn("vendors") && <VendorContractsTab propertyId={id} />}
