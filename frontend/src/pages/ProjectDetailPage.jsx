@@ -21,7 +21,7 @@ import TrashTab from "../components/TrashTab.jsx";
 import LogsTab from "../components/LogsTab.jsx";
 import ReportsTab from "../components/ReportsTab.jsx";
 import DocumentViewerModal from "../components/DocumentViewerModal.jsx";
-import { stagesForVertical, stageIndex, TAB_GROUPS, TAB_LABELS, isStageRelevant, roleLabelsForVertical } from "../config.js";
+import { stagesForVertical, stageIndex, TAB_GROUPS, TAB_LABELS, isStageRelevant, roleLabelsForVertical, membershipRoleLabelsForVertical } from "../config.js";
 
 // Horizontal lifecycle stage tracker. Admin/staff can advance/step back.
 // Same underlying stage keys everywhere; stages/vertical control only the
@@ -108,6 +108,7 @@ function AddMemberInline({ projectId, vertical, onAdded }) {
   const [membershipRole, setMembershipRole] = useState("viewer");
   const [adding, setAdding] = useState(false);
   const roleLabels = roleLabelsForVertical(vertical);
+  const membershipRoleLabels = membershipRoleLabelsForVertical(vertical);
 
   useEffect(() => {
     api.get("/users").then((d) => setUsers(d.users.filter((u) => u.role === "client" || u.role === "trade_partner")));
@@ -152,10 +153,10 @@ function AddMemberInline({ projectId, vertical, onAdded }) {
           ))}
         </select>
         <select value={membershipRole} onChange={(e) => setMembershipRole(e.target.value)} style={{ border: "1.5px solid var(--line)", borderRadius: "6px", padding: "0.55rem 0.8rem", fontSize: "0.88rem" }}>
-          <option value="owner_contact">Owner Contact</option>
-          <option value="project_manager">Project Manager</option>
-          <option value="trade_partner">Trade Partner</option>
-          <option value="viewer">Viewer</option>
+          <option value="owner_contact">{membershipRoleLabels.owner_contact}</option>
+          <option value="project_manager">{membershipRoleLabels.project_manager}</option>
+          <option value="trade_partner">{membershipRoleLabels.trade_partner}</option>
+          <option value="viewer">{membershipRoleLabels.viewer}</option>
         </select>
         <button className="btn btn-outline btn-sm" disabled={adding || !userId}>{adding ? "Adding..." : "+ Add to Project"}</button>
       </form>

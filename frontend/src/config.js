@@ -55,6 +55,17 @@ export const ROLE_LABELS_BY_VERTICAL = {
 };
 export const roleLabelsForVertical = (vertical) => ROLE_LABELS_BY_VERTICAL[vertical] || ROLE_LABELS_BY_VERTICAL.construction;
 
+// Project-membership role (Owner Contact / Project Manager / Trade Partner / Viewer)
+// — different from platform role above (admin/staff/client/trade_partner).
+// Same "same shape, relabeled" pattern, used in ProjectDetailPage.jsx's
+// add-team-member dropdown.
+export const MEMBERSHIP_ROLE_LABELS_BY_VERTICAL = {
+  construction: { owner_contact: "Owner Contact", project_manager: "Project Manager", trade_partner: "Trade Partner", viewer: "Viewer" },
+  facilities:   { owner_contact: "Tenant Contact", project_manager: "Facilities Manager", trade_partner: "Vendor", viewer: "Viewer" },
+  projects:     { owner_contact: "Stakeholder Contact", project_manager: "Project Manager", trade_partner: "Contributor", viewer: "Viewer" },
+};
+export const membershipRoleLabelsForVertical = (vertical) => MEMBERSHIP_ROLE_LABELS_BY_VERTICAL[vertical] || MEMBERSHIP_ROLE_LABELS_BY_VERTICAL.construction;
+
 // ---- Project tab organization ----
 // Tabs are grouped into consistent buckets (same on every project — nothing is
 // ever hidden by stage). The current stage only HIGHLIGHTS the most relevant
