@@ -45,7 +45,11 @@ function guardResource(table) {
   };
 }
 
-const DEFAULT_CATEGORIES = ["Labor", "Materials", "Permits", "Equipment", "Subcontractor", "Other"];
+const DEFAULT_CATEGORIES_BY_VERTICAL = {
+  construction: ["Labor", "Materials", "Permits", "Equipment", "Subcontractor", "Other"],
+  facilities: ["Preventive Maintenance", "Reactive Repairs", "Vendor Contracts", "Parts & Supplies", "Capital Improvements", "Other"],
+  projects: ["Labor", "Contractors & Vendors", "Software & Licenses", "Travel & Expenses", "Equipment & Supplies", "Other"],
+};
 
 // ---------- mappers (snake_case row -> camelCase) ----------
 function centsOf(v) {
@@ -229,14 +233,20 @@ router.post(
       if (existing.rows.length > 0) {
         return res.status(409).json({ error: "This project already has budget categories." });
       }
+      const verticalResult = await pool.query(
+        "SELECT o.vertical FROM projects p JOIN organizations o ON o.id = p.org_id WHERE p.id = $1",
+        [req.params.projectId]
+      );
+      const vertical = verticalResult.rows[0]?.vertical || "construction";
+      const categoriesToSeed = DEFAULT_CATEGORIES_BY_VERTICAL[vertical] || DEFAULT_CATEGORIES_BY_VERTICAL.construction;
       const inserted = [];
-      for (let i = 0; i < DEFAULT_CATEGORIES.length; i++) {
+      for (let i = 0; i < categoriesToSeed.length; i++) {
         const r = await pool.query(
           `INSERT INTO budget_categories (project_id, name, sort_order)
            VALUES ($1, $2, $3)
            ON CONFLICT (project_id, name) DO NOTHING
            RETURNING *`,
-          [req.params.projectId, DEFAULT_CATEGORIES[i], i]
+          [req.params.projectId, categoriesToSeed[i], i]
         );
         if (r.rows[0]) inserted.push(mapCategory(r.rows[0]));
       }
