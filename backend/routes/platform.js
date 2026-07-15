@@ -12,6 +12,17 @@ const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const pool = require("../db/pool");
 const { requireAuth, requirePlatformAdmin, revokeUserSessions, revokeOrgSessions } = require("../middleware/auth");
+
+// Durable audit trail (Phase 8) — writes to audit_log alongside the
+// existing console.log AUDIT lines, which stay in place for quick
+// real-time log tailing. See migrations_phase8_audit.sql.
+async function logAudit(req, action, { targetOrgId = null, targetUserId = null, details = {} } = {}) {
+  await pool.query(
+    `INSERT INTO audit_log (actor_id, actor_email, action, target_org_id, target_user_id, details)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [req.user.id, req.user.email, action, targetOrgId, targetUserId, JSON.stringify(details)]
+  );
+}
 const { getOrgModules, MODULES, MODULE_KEYS } = require("../orgModules");
 const { sendInviteEmail } = require("../invites");
 const { signToken } = require("./auth");
@@ -218,6 +229,7 @@ router.patch("/organizations/:id/status", requireAuth, requirePlatformAdmin, asy
       await revokeOrgSessions(req.params.id);
     }
     console.log(`[radah-pm] AUDIT: platform admin ${req.user.email} set org ${r.rows[0].name} (${req.params.id}) isActive=${isActive}`);
+    await logAudit(req, "org.set_status", { targetOrgId: req.params.id, details: { orgName: r.rows[0].name, isActive } });
     res.json({ id: r.rows[0].id, name: r.rows[0].name, isActive: r.rows[0].is_active });
   } catch (err) {
     console.error("[radah-pm] update org status error:", err);
@@ -253,6 +265,7 @@ router.post("/organizations/:id/impersonate", requireAuth, requirePlatformAdmin,
     const target = u.rows[0];
     const token = signToken(target);
     console.log(`[radah-pm] AUDIT: platform admin ${req.user.email} impersonated ${target.email} (org ${org.rows[0].name}, ${req.params.id})`);
+    await logAudit(req, "org.impersonate", { targetOrgId: req.params.id, targetUserId: target.id, details: { orgName: org.rows[0].name, targetEmail: target.email } });
     res.json({
       token,
       user: {
