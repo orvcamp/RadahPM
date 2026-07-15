@@ -32,12 +32,12 @@ const MODULES = [
   { key: "budget", label: "Budget & Cost", verticals: ["construction", "facilities", "projects"] },
   { key: "reports", label: "Reports", verticals: ["construction", "facilities", "projects"] },
   // Construction-only
-  { key: "changeorders", label: "Change Orders", verticals: ["construction"] },
+  { key: "changeorders", label: "Change Orders", verticals: ["construction", "facilities"] },
   { key: "dailylogs", label: "Daily Logs", verticals: ["construction"] },
   { key: "rfis", label: "RFIs", verticals: ["construction"] },
   { key: "submittals", label: "Submittals", verticals: ["construction"] },
   { key: "logs", label: "Logs & Registers", verticals: ["construction"] },
-  { key: "billing", label: "Billing", verticals: ["construction"] },
+  { key: "billing", label: "Billing", verticals: ["construction", "facilities"] },
   // Facilities-only (Phase 6)
   { key: "assets", label: "Assets", verticals: ["facilities"] },
   { key: "workorders", label: "Work Orders", verticals: ["facilities"] },
