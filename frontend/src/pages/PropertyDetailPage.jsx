@@ -17,6 +17,8 @@ import WorkOrdersTab from "../components/WorkOrdersTab.jsx";
 import VendorContractsTab from "../components/VendorContractsTab.jsx";
 import InspectionsTab from "../components/InspectionsTab.jsx";
 import PropertyScheduleTab from "../components/PropertyScheduleTab.jsx";
+import ChangeOrdersTab from "../components/ChangeOrdersTab.jsx";
+import BillingTab from "../components/BillingTab.jsx";
 
 const TABS = [
   { key: "overview", label: "Overview", module: null },
@@ -27,6 +29,8 @@ const TABS = [
   { key: "inspections", label: "Inspections", module: "inspections" },
   { key: "documents", label: "Documents", module: "documents" },
   { key: "budget", label: "Budget", module: "budget" },
+  { key: "changeorders", label: "Capital Projects", module: "changeorders" },
+  { key: "billing", label: "Billing", module: "billing" },
   { key: "reports", label: "Reports", module: "reports" },
 ];
 
@@ -134,6 +138,8 @@ export default function PropertyDetailPage() {
     modOn(t.module)
     && !(t.key === "schedule" && !(modOn("workorders") || modOn("pm_scheduling") || modOn("inspections")))
     && !(t.module === "budget" && user.role === "trade_partner")
+    && !(t.module === "changeorders" && user.role === "trade_partner")
+    && !(t.module === "billing" && user.role === "trade_partner")
     && !(t.module === "reports" && user.role === "trade_partner")
   );
 
@@ -161,6 +167,8 @@ export default function PropertyDetailPage() {
       {tab === "inspections" && modOn("inspections") && <InspectionsTab propertyId={id} />}
       {tab === "documents" && modOn("documents") && <DocumentsTab projectId={id} />}
       {tab === "budget" && user.role !== "trade_partner" && modOn("budget") && <BudgetTab projectId={id} />}
+      {tab === "changeorders" && user.role !== "trade_partner" && modOn("changeorders") && <ChangeOrdersTab projectId={id} />}
+      {tab === "billing" && user.role !== "trade_partner" && modOn("billing") && <BillingTab projectId={id} />}
       {tab === "reports" && user.role !== "trade_partner" && modOn("reports") && <ReportsTab projectId={id} />}
     </div>
   );
