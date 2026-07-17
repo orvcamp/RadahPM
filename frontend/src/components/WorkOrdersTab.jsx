@@ -83,11 +83,14 @@ function NewWorkOrderModal({ propertyId, assets, onClose, onCreated }) {
   );
 }
 
-function WorkOrderDetailModal({ workOrder, assets, onClose, onSaved, canManage }) {
+function WorkOrderDetailModal({ workOrder, assets, staff, vendors, onClose, onSaved, canManage }) {
   const [status, setStatus] = useState(workOrder.status);
   const [costCents, setCostCents] = useState((workOrder.costCents / 100).toFixed(2));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [assignedTo, setAssignedTo] = useState(
+    workOrder.assignedToUserId ? `user:${workOrder.assignedToUserId}` : workOrder.assignedToVendorId ? `vendor:${workOrder.assignedToVendorId}` : ""
+  );
 
   async function save(patch) {
     setBusy(true);
@@ -100,6 +103,16 @@ function WorkOrderDetailModal({ workOrder, assets, onClose, onSaved, canManage }
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleAssignChange(e) {
+    const val = e.target.value;
+    setAssignedTo(val);
+    const [type, id] = val ? val.split(":") : [null, null];
+    save({
+      assignedToUserId: type === "user" ? id : null,
+      assignedToVendorId: type === "vendor" ? id : null,
+    });
   }
 
   const asset = assets.find((a) => a.id === workOrder.assetId);
@@ -134,6 +147,20 @@ function WorkOrderDetailModal({ workOrder, assets, onClose, onSaved, canManage }
                   style={inputStyle}
                 />
               </div>
+              <div>
+                <label style={labelStyle}>Assigned To</label>
+                <select value={assignedTo} onChange={handleAssignChange} style={inputStyle}>
+                  <optgroup label="Unassigned">
+                    <option value="">Unassigned</option>
+                  </optgroup>
+                  <optgroup label="Staff">
+                    {staff.map((s) => <option key={`user:${s.id}`} value={`user:${s.id}`}>{s.fullName}</option>)}
+                  </optgroup>
+                  <optgroup label="Vendors">
+                    {vendors.map((v) => <option key={`vendor:${v.id}`} value={`vendor:${v.id}`}>{v.name}</option>)}
+                  </optgroup>
+                </select>
+              </div>
             </div>
           </>
         ) : (
@@ -148,10 +175,11 @@ function WorkOrderDetailModal({ workOrder, assets, onClose, onSaved, canManage }
   );
 }
 
-function NewPmScheduleModal({ propertyId, assets, onClose, onCreated }) {
+function NewPmScheduleModal({ propertyId, assets, staff, vendors, onClose, onCreated }) {
   const [form, setForm] = useState({ title: "", description: "", assetId: "", frequencyType: "calendar", intervalDays: "90", nextDueDate: "" });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [defaultAssignedTo, setDefaultAssignedTo] = useState("");
 
   async function submit(e) {
     e.preventDefault();
@@ -160,10 +188,13 @@ function NewPmScheduleModal({ propertyId, assets, onClose, onCreated }) {
     if (!form.nextDueDate) return setError("A next due date is required.");
     setSaving(true);
     try {
+      const [assignType, assignId] = defaultAssignedTo ? defaultAssignedTo.split(":") : [null, null];
       const data = await api.post(`/properties/${propertyId}/pm-schedules`, {
         ...form,
         assetId: form.assetId || null,
         intervalDays: form.intervalDays ? Number(form.intervalDays) : null,
+        defaultAssignedToUserId: assignType === "user" ? assignId : null,
+        defaultAssignedToVendorId: assignType === "vendor" ? assignId : null,
       });
       onCreated(data.pmSchedule);
     } catch (err) {
@@ -192,6 +223,20 @@ function NewPmScheduleModal({ propertyId, assets, onClose, onCreated }) {
               {assets.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           </div>
+          <div className="field">
+            <label>Default Assigned To</label>
+            <select value={defaultAssignedTo} onChange={(e) => setDefaultAssignedTo(e.target.value)}>
+              <optgroup label="Unassigned">
+                <option value="">Unassigned</option>
+              </optgroup>
+              <optgroup label="Staff">
+                {staff.map((s) => <option key={`user:${s.id}`} value={`user:${s.id}`}>{s.fullName}</option>)}
+              </optgroup>
+              <optgroup label="Vendors">
+                {vendors.map((v) => <option key={`vendor:${v.id}`} value={`vendor:${v.id}`}>{v.name}</option>)}
+              </optgroup>
+            </select>
+          </div>
           <div className="form-grid">
             <div className="field">
               <label>Repeats Every (days)</label>
@@ -214,17 +259,75 @@ function NewPmScheduleModal({ propertyId, assets, onClose, onCreated }) {
   );
 }
 
+function AssignPmScheduleModal({ schedule, staff, vendors, onClose, onSaved }) {
+  const [assignedTo, setAssignedTo] = useState(
+    schedule.defaultAssignedToUserId ? `user:${schedule.defaultAssignedToUserId}` : schedule.defaultAssignedToVendorId ? `vendor:${schedule.defaultAssignedToVendorId}` : ""
+  );
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    setError("");
+    const [type, id] = assignedTo ? assignedTo.split(":") : [null, null];
+    try {
+      const data = await api.patch(`/pm-schedules/${schedule.id}`, {
+        defaultAssignedToUserId: type === "user" ? id : null,
+        defaultAssignedToVendorId: type === "vendor" ? id : null,
+      });
+      onSaved(data.pmSchedule);
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3 style={{ fontSize: "1.1rem", textTransform: "uppercase" }}>Assign PM Schedule</h3>
+          <button className="modal-close" onClick={onClose}>&times;</button>
+        </div>
+        {error && <div className="error-msg">{error}</div>}
+        <p style={{ fontWeight: 700, marginBottom: "0.8rem" }}>{schedule.title}</p>
+        <div className="field">
+          <label>Assigned To</label>
+          <select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
+            <optgroup label="Unassigned">
+              <option value="">Unassigned</option>
+            </optgroup>
+            <optgroup label="Staff">
+              {staff.map((s) => <option key={`user:${s.id}`} value={`user:${s.id}`}>{s.fullName}</option>)}
+            </optgroup>
+            <optgroup label="Vendors">
+              {vendors.map((v) => <option key={`vendor:${v.id}`} value={`vendor:${v.id}`}>{v.name}</option>)}
+            </optgroup>
+          </select>
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem", marginTop: "1rem" }}>
+          <button className="btn btn-outline" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? "Saving..." : "Save"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function WorkOrdersTab({ propertyId }) {
   const { user } = useAuth();
   const canManage = user.role === "admin" || user.role === "staff";
   const [workOrders, setWorkOrders] = useState([]);
   const [pmSchedules, setPmSchedules] = useState([]);
   const [assets, setAssets] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showNewWO, setShowNewWO] = useState(false);
   const [showNewPM, setShowNewPM] = useState(false);
   const [detailWO, setDetailWO] = useState(null);
+  const [assignPM, setAssignPM] = useState(null);
   const [busyId, setBusyId] = useState(null);
 
   function load() {
@@ -233,8 +336,14 @@ export default function WorkOrdersTab({ propertyId }) {
       api.get(`/properties/${propertyId}/work-orders`),
       api.get(`/properties/${propertyId}/pm-schedules`),
       api.get(`/properties/${propertyId}/assets`),
+      canManage ? api.get("/users").catch(() => ({ users: [] })) : Promise.resolve({ users: [] }),
+      canManage ? api.get("/vendors").catch(() => ({ vendors: [] })) : Promise.resolve({ vendors: [] }),
     ])
-      .then(([wo, pm, a]) => { setWorkOrders(wo.workOrders); setPmSchedules(pm.pmSchedules); setAssets(a.assets); })
+      .then(([wo, pm, a, u, v]) => {
+        setWorkOrders(wo.workOrders); setPmSchedules(pm.pmSchedules); setAssets(a.assets);
+        setStaff((u.users || []).filter((usr) => usr.role === "admin" || usr.role === "staff"));
+        setVendors(v.vendors || []);
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }
@@ -307,7 +416,10 @@ export default function WorkOrdersTab({ propertyId }) {
                         <td><strong>{s.title}</strong></td>
                         <td>{s.intervalDays ? `every ${s.intervalDays} days` : "—"}</td>
                         <td>{fmtDate(s.nextDueDate)} {due && <span className="badge badge-on_hold" style={{ marginLeft: 6 }}>due</span>}</td>
-                        <td><button className="btn btn-outline btn-sm" disabled={busyId === s.id} onClick={() => generateNow(s.id)}>{busyId === s.id ? "Generating…" : "Generate Now"}</button></td>
+                        <td>
+                          <button className="btn btn-outline btn-sm" onClick={() => setAssignPM(s)} style={{ marginRight: 6 }}>Assign</button>
+                          <button className="btn btn-outline btn-sm" disabled={busyId === s.id} onClick={() => generateNow(s.id)}>{busyId === s.id ? "Generating…" : "Generate Now"}</button>
+                        </td>
                       </tr>
                     );
                   })}
@@ -330,6 +442,8 @@ export default function WorkOrdersTab({ propertyId }) {
         <NewPmScheduleModal
           propertyId={propertyId}
           assets={assets}
+          staff={staff}
+          vendors={vendors}
           onClose={() => setShowNewPM(false)}
           onCreated={(s) => { setShowNewPM(false); setPmSchedules((prev) => [...prev, s]); }}
         />
@@ -338,11 +452,25 @@ export default function WorkOrdersTab({ propertyId }) {
         <WorkOrderDetailModal
           workOrder={detailWO}
           assets={assets}
+          staff={staff}
+          vendors={vendors}
           canManage={canManage}
           onClose={() => setDetailWO(null)}
           onSaved={(saved) => {
             setDetailWO(saved);
             setWorkOrders((prev) => prev.map((w) => (w.id === saved.id ? saved : w)));
+          }}
+        />
+      )}
+      {assignPM && (
+        <AssignPmScheduleModal
+          schedule={assignPM}
+          staff={staff}
+          vendors={vendors}
+          onClose={() => setAssignPM(null)}
+          onSaved={(saved) => {
+            setAssignPM(null);
+            setPmSchedules((prev) => prev.map((s) => (s.id === saved.id ? saved : s)));
           }}
         />
       )}

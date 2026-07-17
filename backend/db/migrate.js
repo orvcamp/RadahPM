@@ -58,6 +58,7 @@ async function migrate() {
     await runSqlFile("migrations_phase6_facilities.sql", "Phase 6 migration (MangoDoe Facilities: properties, assets, work orders, PM schedules, vendors, inspections)");
     await runSqlFile("migrations_phase7_projects.sql", "Phase 7 migration (MangoDoe Projects: time entries, approval requests, folder template)");
   await runSqlFile("migrations_phase8_audit.sql", "Phase 8 migration (audit log)");
+  await runSqlFile("migrations_phase9_pm_assignee.sql", "Phase 9 migration (PM schedule default assignee)");
   } finally {
     await pool.end();
   }

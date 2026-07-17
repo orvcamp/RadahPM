@@ -49,6 +49,8 @@ function mapPmSchedule(row) {
     intervalDays: row.interval_days,
     nextDueDate: row.next_due_date,
     isActive: row.is_active,
+    defaultAssignedToUserId: row.default_assigned_to_user_id,
+    defaultAssignedToVendorId: row.default_assigned_to_vendor_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -129,7 +131,7 @@ router.post("/properties/:propertyId/work-orders", requireAuth, requireModule("w
 router.patch("/work-orders/:id", requireAuth, requireRole("admin", "staff"), guardWorkOrder, async (req, res) => {
   const bodyKeyMap = {
     title: "title", description: "description", priority: "priority", status: "status",
-    assetId: "asset_id", assignedToUserId: "assigned_to_user_id", assignedToVendorId: "assigned_to_vendor_id",
+    assetId: "asset_id",
     scheduledDate: "scheduled_date", costCents: "cost_cents",
   };
   const updates = [];
@@ -142,9 +144,18 @@ router.patch("/work-orders/:id", requireAuth, requireRole("admin", "staff"), gua
       i++;
     }
   }
-  // Assignment is either a user or a vendor, never both — enforced here.
-  if (req.body && req.body.assignedToUserId) updates.push(`assigned_to_vendor_id = NULL`);
-  if (req.body && req.body.assignedToVendorId) updates.push(`assigned_to_user_id = NULL`);
+  // Assignment is either a user or a vendor, never both. Handled as one block
+  // (rather than in bodyKeyMap above) because both keys may arrive together
+  // from the frontend (one real id, one explicit null) — setting each column
+  // exactly once here avoids ever generating two SET clauses for the same column.
+  if (req.body && (req.body.assignedToUserId !== undefined || req.body.assignedToVendorId !== undefined)) {
+    updates.push(`assigned_to_user_id = $${i}`);
+    values.push(req.body.assignedToUserId || null);
+    i++;
+    updates.push(`assigned_to_vendor_id = $${i}`);
+    values.push(req.body.assignedToVendorId || null);
+    i++;
+  }
   if (req.body && req.body.status === "completed") updates.push(`completed_at = now()`);
   if (updates.length === 0) return res.status(400).json({ error: "No valid fields provided to update." });
   try {
@@ -191,15 +202,18 @@ router.post(
   requireRole("admin", "staff"),
   guardProperty,
   async (req, res) => {
-    const { assetId, title, description, frequencyType, intervalDays, nextDueDate } = req.body || {};
+    const { assetId, title, description, frequencyType, intervalDays, nextDueDate, defaultAssignedToUserId, defaultAssignedToVendorId } = req.body || {};
     if (!title) return res.status(400).json({ error: "Title is required." });
     if (!nextDueDate) return res.status(400).json({ error: "A next due date is required." });
+    // Assignment is either a user or a vendor, never both.
+    const assignedUserId = defaultAssignedToVendorId ? null : (defaultAssignedToUserId || null);
+    const assignedVendorId = defaultAssignedToUserId ? null : (defaultAssignedToVendorId || null);
     try {
       const r = await pool.query(
-        `INSERT INTO pm_schedules (project_id, asset_id, title, description, frequency_type, interval_days, next_due_date, created_by)
-         VALUES ($1, $2, $3, $4, COALESCE($5, 'calendar'), $6, $7, $8) RETURNING *`,
-        [req.params.propertyId, assetId || null, title, description || null, frequencyType || null,
-          intervalDays || null, nextDueDate, req.user.id]
+        `INSERT INTO pm_schedules (project_id, asset_id, title, description, frequency_type, interval_days, next_due_date, default_assigned_to_user_id, default_assigned_to_vendor_id, created_by)
+         VALUES ($1, $2, $3, $4, COALESCE($5, 'calendar'), $6, $7, $8, $9, $10) RETURNING *`,
+        [req.params.propertyId, assetId || null, title, description || null,
+          frequencyType || null, intervalDays || null, nextDueDate, assignedUserId, assignedVendorId, req.user.id]
       );
       res.status(201).json({ pmSchedule: mapPmSchedule(r.rows[0]) });
     } catch (err) {
@@ -223,6 +237,19 @@ router.patch("/pm-schedules/:id", requireAuth, requireRole("admin", "staff"), gu
       values.push(req.body[bodyKey]);
       i++;
     }
+  }
+  // Assignment is either a user or a vendor, never both. Handled as one block
+  // (rather than in bodyKeyMap above) because both keys may arrive together
+  // from the frontend (one real id, one explicit null) — setting each column
+  // exactly once here avoids ever generating two SET clauses for the same column.
+  // (Same class of bug as PATCH /work-orders/:id, fixed earlier this session.)
+  if (req.body && (req.body.defaultAssignedToUserId !== undefined || req.body.defaultAssignedToVendorId !== undefined)) {
+    updates.push(`default_assigned_to_user_id = $${i}`);
+    values.push(req.body.defaultAssignedToUserId || null);
+    i++;
+    updates.push(`default_assigned_to_vendor_id = $${i}`);
+    values.push(req.body.defaultAssignedToVendorId || null);
+    i++;
   }
   if (updates.length === 0) return res.status(400).json({ error: "No valid fields provided to update." });
   try {
@@ -266,9 +293,10 @@ router.post(
       if (!s) { await client.query("ROLLBACK"); return res.status(404).json({ error: "PM schedule not found." }); }
 
       const wo = await client.query(
-        `INSERT INTO work_orders (project_id, asset_id, title, description, priority, pm_schedule_id, created_by)
-         VALUES ($1, $2, $3, $4, 'normal', $5, $6) RETURNING *`,
-        [s.project_id, s.asset_id, s.title, s.description, s.id, req.user.id]
+        `INSERT INTO work_orders (project_id, asset_id, title, description, priority, pm_schedule_id, assigned_to_user_id, assigned_to_vendor_id, created_by)
+         VALUES ($1, $2, $3, $4, 'normal', $5, $6, $7, $8) RETURNING *`,
+        [s.project_id, s.asset_id, s.title, s.description, s.id,
+          s.default_assigned_to_user_id, s.default_assigned_to_vendor_id, req.user.id]
       );
 
       if (s.frequency_type === "calendar" && s.interval_days) {
