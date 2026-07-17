@@ -13,6 +13,7 @@ const express = require("express");
 const pool = require("../db/pool");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { requireModule } = require("../orgModules");
+const { notifyAssigneeExternal } = require("../notifyExternal");
 const { userCanAccessProject } = require("./projects");
 
 const router = express.Router();
@@ -161,7 +162,14 @@ router.patch("/work-orders/:id", requireAuth, requireRole("admin", "staff"), gua
   try {
     values.push(req.params.id);
     const r = await pool.query(`UPDATE work_orders SET ${updates.join(", ")} WHERE id = $${i} RETURNING *`, values);
-    res.json({ workOrder: mapWorkOrder(r.rows[0]) });
+    const updated = r.rows[0];
+    // Fire-and-forget: assignment change email (never blocks the response).
+    if (req.body && (req.body.assignedToUserId !== undefined || req.body.assignedToVendorId !== undefined)) {
+      const assigneeType = updated.assigned_to_user_id ? "user" : updated.assigned_to_vendor_id ? "vendor" : null;
+      const assigneeId = updated.assigned_to_user_id || updated.assigned_to_vendor_id || null;
+      notifyAssigneeExternal({ workOrder: updated, assigneeType, assigneeId });
+    }
+    res.json({ workOrder: mapWorkOrder(updated) });
   } catch (err) {
     console.error("[radah-pm] update work order error:", err);
     res.status(500).json({ error: "Something went wrong." });
@@ -308,7 +316,13 @@ async function generatePmScheduleWorkOrder(scheduleId, createdByUserId) {
     }
 
     await client.query("COMMIT");
-    return { workOrder: wo.rows[0] };
+    const created = wo.rows[0];
+    // Fire-and-forget: assignment email (never blocks the caller — manual
+    // click or the daily cron job — on notification success/failure).
+    const assigneeType = created.assigned_to_user_id ? "user" : created.assigned_to_vendor_id ? "vendor" : null;
+    const assigneeId = created.assigned_to_user_id || created.assigned_to_vendor_id || null;
+    notifyAssigneeExternal({ workOrder: created, assigneeType, assigneeId });
+    return { workOrder: created };
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     throw err;
