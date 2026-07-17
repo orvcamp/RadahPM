@@ -279,46 +279,63 @@ router.delete("/pm-schedules/:id", requireAuth, requireRole("admin", "staff"), g
 // automatically once next_due_date <= today — not built in this pass (see
 // note below) — but it's fully functional as a manual "generate now"
 // action today.
+// Shared by the manual "Generate Now" button (POST /pm-schedules/:id/generate
+// below) and backend/scripts/generate-due-schedules.js (the daily Railway
+// Cron Job). Both must produce identical results, so this is the one place
+// that logic lives. createdByUserId is null for automated/cron-triggered
+// runs (created_by is nullable on work_orders) and the real user id for
+// manual clicks.
+async function generatePmScheduleWorkOrder(scheduleId, createdByUserId) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const sched = await client.query("SELECT * FROM pm_schedules WHERE id = $1 FOR UPDATE", [scheduleId]);
+    const s = sched.rows[0];
+    if (!s) { await client.query("ROLLBACK"); return { notFound: true }; }
+
+    const wo = await client.query(
+      `INSERT INTO work_orders (project_id, asset_id, title, description, priority, pm_schedule_id, assigned_to_user_id, assigned_to_vendor_id, created_by)
+       VALUES ($1, $2, $3, $4, 'normal', $5, $6, $7, $8) RETURNING *`,
+      [s.project_id, s.asset_id, s.title, s.description, s.id,
+        s.default_assigned_to_user_id, s.default_assigned_to_vendor_id, createdByUserId]
+    );
+
+    if (s.frequency_type === "calendar" && s.interval_days) {
+      await client.query(
+        "UPDATE pm_schedules SET next_due_date = next_due_date + ($1 || ' days')::interval WHERE id = $2",
+        [s.interval_days, s.id]
+      );
+    }
+
+    await client.query("COMMIT");
+    return { workOrder: wo.rows[0] };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 router.post(
   "/pm-schedules/:id/generate",
   requireAuth,
   requireRole("admin", "staff"),
   guardPmSchedule,
   async (req, res) => {
-    const client = await pool.connect();
     try {
-      await client.query("BEGIN");
-      const sched = await client.query("SELECT * FROM pm_schedules WHERE id = $1 FOR UPDATE", [req.params.id]);
-      const s = sched.rows[0];
-      if (!s) { await client.query("ROLLBACK"); return res.status(404).json({ error: "PM schedule not found." }); }
-
-      const wo = await client.query(
-        `INSERT INTO work_orders (project_id, asset_id, title, description, priority, pm_schedule_id, assigned_to_user_id, assigned_to_vendor_id, created_by)
-         VALUES ($1, $2, $3, $4, 'normal', $5, $6, $7, $8) RETURNING *`,
-        [s.project_id, s.asset_id, s.title, s.description, s.id,
-          s.default_assigned_to_user_id, s.default_assigned_to_vendor_id, req.user.id]
-      );
-
-      if (s.frequency_type === "calendar" && s.interval_days) {
-        await client.query(
-          "UPDATE pm_schedules SET next_due_date = next_due_date + ($1 || ' days')::interval WHERE id = $2",
-          [s.interval_days, s.id]
-        );
-      }
-
-      await client.query("COMMIT");
-      res.status(201).json({ workOrder: mapWorkOrder(wo.rows[0]) });
+      const result = await generatePmScheduleWorkOrder(req.params.id, req.user.id);
+      if (result.notFound) return res.status(404).json({ error: "PM schedule not found." });
+      res.status(201).json({ workOrder: mapWorkOrder(result.workOrder) });
     } catch (err) {
-      await client.query("ROLLBACK").catch(() => {});
       console.error("[radah-pm] generate work order from PM schedule error:", err);
       res.status(500).json({ error: "Something went wrong." });
-    } finally {
-      client.release();
     }
   }
 );
 
 module.exports = router;
+module.exports.generatePmScheduleWorkOrder = generatePmScheduleWorkOrder;
 
 // ------------------------------------------------------------
 // NOT built in this pass, deliberately: an automatic scheduler that scans
