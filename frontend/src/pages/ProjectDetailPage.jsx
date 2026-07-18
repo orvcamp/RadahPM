@@ -272,6 +272,7 @@ export default function ProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [taskModal, setTaskModal] = useState(null); // null | {} (new) | task (edit)
+  const [taskView, setTaskView] = useState("list"); // "list" | "board"
   const [viewSchedule, setViewSchedule] = useState(null); // schedule doc being previewed
 
   const loadAll = useCallback(async () => {
@@ -406,14 +407,75 @@ export default function ProjectDetailPage() {
 
       {tab === "tasks" && (
         <div>
-          {canEditTasks && (
-            <div className="flex-between" style={{ marginBottom: "1rem" }}>
-              <span />
-              <button className="btn btn-gold" onClick={() => setTaskModal({})}>+ New Task</button>
+          <div className="flex-between" style={{ marginBottom: "1rem" }}>
+            <div style={{ display: "flex", gap: "0.4rem" }}>
+              <button
+                className={`btn btn-sm ${taskView === "list" ? "btn-gold" : "btn-outline"}`}
+                onClick={() => setTaskView("list")}
+              >
+                List
+              </button>
+              <button
+                className={`btn btn-sm ${taskView === "board" ? "btn-gold" : "btn-outline"}`}
+                onClick={() => setTaskView("board")}
+              >
+                Board
+              </button>
             </div>
-          )}
+            {canEditTasks && (
+              <button className="btn btn-gold" onClick={() => setTaskModal({})}>+ New Task</button>
+            )}
+          </div>
           {tasks.length === 0 ? (
             <div className="card"><div className="empty-state"><h3>No tasks yet</h3></div></div>
+          ) : taskView === "board" ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.8rem" }}>
+              {["not_started", "in_progress", "blocked", "completed"].map((col) => {
+                const colTasks = tasks.filter((t) => t.status === col);
+                return (
+                  <div key={col} className="card" style={{ padding: "0.6rem" }}>
+                    <div style={{ fontWeight: 700, fontSize: "0.85rem", textTransform: "uppercase", marginBottom: "0.6rem", display: "flex", justifyContent: "space-between" }}>
+                      <span>{col.replace("_", " ")}</span>
+                      <span style={{ color: "var(--steel)" }}>{colTasks.length}</span>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                      {colTasks.map((task) => {
+                        const editable = canEditTasks || canUpdateOwnTask(task);
+                        return (
+                          <div key={task.id} className="card" style={{ padding: "0.6rem", boxShadow: "0 1px 2px rgba(0,0,0,0.08)" }}>
+                            <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: "0.3rem" }}>
+                              {task.title}
+                              {task.isMilestone && <span className="badge" style={{ background: "rgba(201,162,39,0.15)", color: "#8a6c14", marginLeft: "0.4rem" }}>milestone</span>}
+                            </div>
+                            <div className="text-sm text-steel" style={{ marginBottom: "0.3rem" }}>{task.assignedToName || "Unassigned"}</div>
+                            {task.dueDate && <div className="text-sm text-steel" style={{ marginBottom: "0.4rem" }}>Due {new Date(task.dueDate).toLocaleDateString()}</div>}
+                            {editable && (
+                              <select
+                                value={task.status}
+                                onChange={(e) => handleStatusChange(task, e.target.value)}
+                                style={{ width: "100%", border: "1px solid var(--line)", borderRadius: "4px", padding: "0.3rem 0.5rem", fontSize: "0.78rem", marginBottom: "0.4rem" }}
+                              >
+                                <option value="not_started">not started</option>
+                                <option value="in_progress">in progress</option>
+                                <option value="blocked">blocked</option>
+                                <option value="completed">completed</option>
+                              </select>
+                            )}
+                            {canEditTasks && (
+                              <div style={{ display: "flex", gap: "0.4rem" }}>
+                                <button className="btn btn-outline btn-sm" onClick={() => setTaskModal(task)}>Edit</button>
+                                <button className="btn btn-danger btn-sm" onClick={() => handleDeleteTask(task.id)}>Delete</button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {colTasks.length === 0 && <div className="text-sm text-steel" style={{ fontStyle: "italic" }}>No tasks</div>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           ) : (
             <div className="card" style={{ padding: 0 }}>
               <table className="data-table">
