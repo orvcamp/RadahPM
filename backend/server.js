@@ -31,6 +31,10 @@ const vendorRoutes = require("./routes/vendors"); // MangoDoe Facilities: Vendor
 const inspectionRoutes = require("./routes/inspections"); // MangoDoe Facilities: Inspections & Compliance
 const timeEntryRoutes = require("./routes/timeentries"); // MangoDoe Projects: Time Tracking
 const approvalRoutes = require("./routes/approvals"); // MangoDoe Projects: Approvals
+const portalAuthRoutes = require("./routes/portalAuth"); // Property Owner Portal: login/me/change-password
+const portalRoutes = require("./routes/portal"); // Property Owner Portal: owner-facing data
+const portalAccessRoutes = require("./routes/portalAccess"); // Property Owner Portal: staff-facing access grants
+const protectRoutes = require("./routes/protect"); // Radah Protect: tiers & memberships
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -88,6 +92,10 @@ app.use("/api", vendorRoutes); // Facilities: Vendors (/api/vendors) & Vendor Co
 app.use("/api", inspectionRoutes); // Facilities: Inspections & Compliance
 app.use("/api", timeEntryRoutes); // Projects: Time Tracking
 app.use("/api", approvalRoutes); // Projects: Approvals
+app.use("/api/portal", portalAuthRoutes); // Property Owner Portal: login/me/change-password
+app.use("/api/portal", portalRoutes); // Property Owner Portal: owner-facing data
+app.use("/api", portalAccessRoutes); // Property Owner Portal: staff-facing access grants
+app.use("/api", protectRoutes); // Radah Protect: tiers & memberships
 
 // 404 handler
 app.use((req, res) => {

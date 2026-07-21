@@ -44,6 +44,8 @@ const MODULES = [
   { key: "pm_scheduling", label: "Preventive Maintenance", verticals: ["facilities"] },
   { key: "vendors", label: "Vendors & Contracts", verticals: ["facilities"] },
   { key: "inspections", label: "Inspections & Compliance", verticals: ["facilities"] },
+  { key: "owner_portal", label: "Property Owner Portal", verticals: ["facilities"] },
+  { key: "protect", label: "Radah Protect", verticals: ["facilities"] },
   // Projects-only (Phase 7)
   { key: "approvals", label: "Approvals", verticals: ["projects"] },
   { key: "time_tracking", label: "Time Tracking", verticals: ["projects"] },
