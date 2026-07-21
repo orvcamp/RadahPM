@@ -2,6 +2,7 @@
 
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext.jsx";
+import { usePortalAuth } from "./context/PortalAuthContext.jsx";
 
 import LoginPage from "./pages/LoginPage.jsx";
 import RegisterPage from "./pages/RegisterPage.jsx";
@@ -17,6 +18,10 @@ import VendorsPage from "./pages/VendorsPage.jsx";
 import UsersPage from "./pages/UsersPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
 import PlatformAdminPage from "./pages/PlatformAdminPage.jsx";
+import PortalLoginPage from "./pages/PortalLoginPage.jsx";
+import PortalLayout from "./components/PortalLayout.jsx";
+import PortalDashboardPage from "./pages/PortalDashboardPage.jsx";
+import PortalPropertyPage from "./pages/PortalPropertyPage.jsx";
 
 function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -35,6 +40,28 @@ function ProtectedRoute({ children, roles }) {
 
   if (roles && !roles.includes(user.role)) {
     return <Navigate to="/" replace />;
+  }
+
+  return children;
+}
+
+// Same shape as ProtectedRoute, checking the separate portal session
+// instead — a staff `user` being logged in doesn't grant portal access,
+// and vice versa, since these are unrelated identities (see
+// PortalAuthContext.jsx).
+function PortalProtectedRoute({ children }) {
+  const { account, loading } = usePortalAuth();
+
+  if (loading) {
+    return (
+      <div className="center-page">
+        <div className="loading-spinner" />
+      </div>
+    );
+  }
+
+  if (!account) {
+    return <Navigate to="/portal/login" replace />;
   }
 
   return children;
@@ -72,6 +99,19 @@ export default function App() {
         />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="platform" element={<PlatformAdminPage />} />
+      </Route>
+
+      <Route path="/portal/login" element={<PortalLoginPage />} />
+      <Route
+        path="/portal"
+        element={
+          <PortalProtectedRoute>
+            <PortalLayout />
+          </PortalProtectedRoute>
+        }
+      >
+        <Route index element={<PortalDashboardPage />} />
+        <Route path="properties/:id" element={<PortalPropertyPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />
