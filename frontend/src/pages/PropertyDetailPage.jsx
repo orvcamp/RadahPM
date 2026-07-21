@@ -19,6 +19,7 @@ import InspectionsTab from "../components/InspectionsTab.jsx";
 import PropertyScheduleTab from "../components/PropertyScheduleTab.jsx";
 import ChangeOrdersTab from "../components/ChangeOrdersTab.jsx";
 import BillingTab from "../components/BillingTab.jsx";
+import PortalAccessTab from "../components/PortalAccessTab.jsx";
 
 const TABS = [
   { key: "overview", label: "Overview", module: null },
@@ -28,6 +29,7 @@ const TABS = [
   { key: "vendorcontracts", label: "Vendor Contracts", module: "vendors" },
   { key: "inspections", label: "Inspections", module: "inspections" },
   { key: "documents", label: "Documents", module: "documents" },
+  { key: "portalaccess", label: "Owner Portal", module: "owner_portal" },
   { key: "budget", label: "Budget", module: "budget" },
   { key: "changeorders", label: "Capital Projects", module: "changeorders" },
   { key: "billing", label: "Billing", module: "billing" },
@@ -166,6 +168,7 @@ export default function PropertyDetailPage() {
       {tab === "vendorcontracts" && modOn("vendors") && <VendorContractsTab propertyId={id} />}
       {tab === "inspections" && modOn("inspections") && <InspectionsTab propertyId={id} />}
       {tab === "documents" && modOn("documents") && <DocumentsTab projectId={id} />}
+      {tab === "portalaccess" && modOn("owner_portal") && <PortalAccessTab propertyId={id} />}
       {tab === "budget" && user.role !== "trade_partner" && modOn("budget") && <BudgetTab projectId={id} />}
       {tab === "changeorders" && user.role !== "trade_partner" && modOn("changeorders") && <ChangeOrdersTab projectId={id} />}
       {tab === "billing" && user.role !== "trade_partner" && modOn("billing") && <BillingTab projectId={id} />}
