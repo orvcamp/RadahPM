@@ -216,7 +216,7 @@ export default function PortalAccessTab({ propertyId }) {
         <GrantAccessModal
           propertyId={propertyId}
           onClose={() => setShowNew(false)}
-          onGranted={() => load()}
+          onGranted={(grant) => setGrants((prev) => [grant, ...prev])}
         />
       )}
     </div>
