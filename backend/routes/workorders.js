@@ -401,7 +401,7 @@ router.get("/work-orders/:id/attachments", requireAuth, guardWorkOrder, async (r
     const attachments = await Promise.all(
       r.rows.map(async (row) => ({
         ...mapAttachment(row),
-        downloadUrl: r2.isConfigured ? await r2.getDownloadUrl(row.storage_key, row.file_name) : null,
+        downloadUrl: r2.isConfigured ? await r2.getViewUrl(row.storage_key, row.content_type) : null,
       }))
     );
     res.json({ attachments });

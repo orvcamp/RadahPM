@@ -294,7 +294,7 @@ router.get(
           sizeBytes: row.size_bytes ? Number(row.size_bytes) : null,
           uploadedByMe: row.uploaded_by_portal_account_id === req.portalAccount.id,
           createdAt: row.created_at,
-          downloadUrl: r2.isConfigured ? await r2.getDownloadUrl(row.storage_key, row.file_name) : null,
+          downloadUrl: r2.isConfigured ? await r2.getViewUrl(row.storage_key, row.content_type) : null,
         }))
       );
       res.json({ attachments });
