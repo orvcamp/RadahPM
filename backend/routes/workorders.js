@@ -10,11 +10,13 @@
 // call once that job exists.
 
 const express = require("express");
+const crypto = require("crypto");
 const pool = require("../db/pool");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { requireModule } = require("../orgModules");
 const { notifyAssigneeExternal } = require("../notifyExternal");
 const { userCanAccessProject } = require("./projects");
+const r2 = require("../db/r2");
 
 const router = express.Router();
 
@@ -347,6 +349,122 @@ router.post(
     }
   }
 );
+
+// ============================================================
+// WORK ORDER ATTACHMENTS (staff-facing)
+// ============================================================
+// A work order attachment is just a `documents` row (same R2-backed
+// table Documents tab uses) linked via work_order_documents — see the
+// Phase 10 migration notes. That means every attachment here is also
+// automatically visible in the property's own Documents tab; nothing
+// extra needed for that.
+
+function requireR2(req, res, next) {
+  if (!r2.isConfigured) {
+    return res.status(503).json({ error: "Document storage is not configured yet. Please contact your administrator." });
+  }
+  next();
+}
+
+function buildWorkOrderStorageKey(propertyId, fileName) {
+  const safeName = (fileName || "file").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
+  return `projects/${propertyId}/${crypto.randomUUID()}-${safeName}`;
+}
+
+function mapAttachment(row) {
+  return {
+    id: row.document_id,
+    fileName: row.file_name,
+    contentType: row.content_type,
+    sizeBytes: row.size_bytes ? Number(row.size_bytes) : null,
+    uploadedByName: row.uploaded_by_name || null,
+    uploadedByPortalAccount: row.uploaded_by_portal_account_id ? true : false,
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * GET /api/work-orders/:id/attachments
+ */
+router.get("/work-orders/:id/attachments", requireAuth, guardWorkOrder, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT d.id AS document_id, d.file_name, d.content_type, d.size_bytes, d.storage_key,
+              d.uploaded_by_portal_account_id, d.created_at, u.full_name AS uploaded_by_name
+       FROM work_order_documents wod
+       JOIN documents d ON d.id = wod.document_id
+       LEFT JOIN users u ON u.id = d.uploaded_by
+       WHERE wod.work_order_id = $1
+       ORDER BY d.created_at DESC`,
+      [req.params.id]
+    );
+    const attachments = await Promise.all(
+      r.rows.map(async (row) => ({
+        ...mapAttachment(row),
+        downloadUrl: r2.isConfigured ? await r2.getDownloadUrl(row.storage_key, row.file_name) : null,
+      }))
+    );
+    res.json({ attachments });
+  } catch (err) {
+    console.error("[radah-pm] list work order attachments error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
+/**
+ * POST /api/work-orders/:id/attachments/upload-url
+ * Body: { fileName, contentType }
+ */
+router.post("/work-orders/:id/attachments/upload-url", requireAuth, requireR2, guardWorkOrder, async (req, res) => {
+  const { fileName, contentType } = req.body || {};
+  if (!fileName) return res.status(400).json({ error: "fileName is required." });
+  try {
+    const storageKey = buildWorkOrderStorageKey(req.propertyId, fileName);
+    const uploadUrl = await r2.getUploadUrl(storageKey, contentType);
+    res.json({ uploadUrl, storageKey });
+  } catch (err) {
+    console.error("[radah-pm] work order attachment upload-url error:", err);
+    res.status(500).json({ error: "Could not prepare the upload. Please try again." });
+  }
+});
+
+/**
+ * POST /api/work-orders/:id/attachments/confirm
+ * Body: { storageKey, fileName, contentType, sizeBytes }
+ */
+router.post("/work-orders/:id/attachments/confirm", requireAuth, requireR2, guardWorkOrder, async (req, res) => {
+  const { storageKey, fileName, contentType, sizeBytes } = req.body || {};
+  if (!storageKey || !fileName) return res.status(400).json({ error: "storageKey and fileName are required." });
+  if (!storageKey.startsWith(`projects/${req.propertyId}/`)) {
+    return res.status(400).json({ error: "Invalid storage key for this property." });
+  }
+  try {
+    const doc = await pool.query(
+      `INSERT INTO documents (project_id, storage_key, file_name, content_type, size_bytes, uploaded_by)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, file_name, content_type, size_bytes, created_at`,
+      [req.propertyId, storageKey, fileName, contentType || null, sizeBytes || null, req.user.id]
+    );
+    await pool.query(
+      `INSERT INTO work_order_documents (work_order_id, document_id) VALUES ($1, $2)
+       ON CONFLICT (work_order_id, document_id) DO NOTHING`,
+      [req.params.id, doc.rows[0].id]
+    );
+    res.status(201).json({
+      attachment: {
+        id: doc.rows[0].id,
+        fileName: doc.rows[0].file_name,
+        contentType: doc.rows[0].content_type,
+        sizeBytes: doc.rows[0].size_bytes ? Number(doc.rows[0].size_bytes) : null,
+        uploadedByName: req.user.fullName,
+        uploadedByPortalAccount: false,
+        createdAt: doc.rows[0].created_at,
+      },
+    });
+  } catch (err) {
+    console.error("[radah-pm] work order attachment confirm error:", err);
+    res.status(500).json({ error: "Could not save the attachment." });
+  }
+});
 
 module.exports = router;
 module.exports.generatePmScheduleWorkOrder = generatePmScheduleWorkOrder;

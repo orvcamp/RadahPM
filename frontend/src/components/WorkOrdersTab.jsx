@@ -4,7 +4,7 @@
 // a Property. Combined into one tab since they're tightly related (a PM
 // schedule spawns a work order).
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext.jsx";
 
@@ -79,6 +79,98 @@ function NewWorkOrderModal({ propertyId, assets, onClose, onCreated }) {
           </button>
         </form>
       </div>
+    </div>
+  );
+}
+
+function WorkOrderAttachments({ workOrderId }) {
+  const [attachments, setAttachments] = useState(null);
+  const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState("");
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    api
+      .get(`/work-orders/${workOrderId}/attachments`)
+      .then((data) => setAttachments(data.attachments))
+      .catch((err) => setError(err.message || "Couldn't load attachments."));
+  }, [workOrderId]);
+
+  async function handleFileSelected(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setError("");
+    setUploading(true);
+    try {
+      setUploadProgress("Preparing upload...");
+      const { uploadUrl, storageKey } = await api.post(`/work-orders/${workOrderId}/attachments/upload-url`, {
+        fileName: file.name,
+        contentType: file.type || "application/octet-stream",
+      });
+      setUploadProgress(`Uploading ${file.name}...`);
+      const putRes = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+      if (!putRes.ok) throw new Error("Upload to storage failed. Please try again.");
+      setUploadProgress("Finishing up...");
+      const { attachment } = await api.post(`/work-orders/${workOrderId}/attachments/confirm`, {
+        storageKey,
+        fileName: file.name,
+        contentType: file.type || "application/octet-stream",
+        sizeBytes: file.size,
+      });
+      setAttachments((prev) => [attachment, ...(prev || [])]);
+    } catch (err) {
+      setError(err.message || "Upload failed.");
+    } finally {
+      setUploading(false);
+      setUploadProgress("");
+    }
+  }
+
+  return (
+    <div style={{ marginBottom: "1rem" }}>
+      <label style={labelStyle}>Photos & Documents</label>
+      {error && <div className="error-msg">{error}</div>}
+      <input ref={fileInputRef} type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={handleFileSelected} />
+      {attachments === null ? (
+        <div className="loading-spinner" />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginBottom: "0.6rem" }}>
+          {attachments.length === 0 && <p className="text-sm text-steel">No files attached yet.</p>}
+          {attachments.map((a) => (
+            <div
+              key={a.id}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "0.45rem 0.6rem",
+                border: "1px solid var(--line)",
+                borderRadius: 6,
+                fontSize: "0.85rem",
+              }}
+            >
+              <span>
+                {a.fileName}
+                {a.uploadedByPortalAccount && <span className="badge badge-active" style={{ marginLeft: 6 }}>from owner</span>}
+              </span>
+              {a.downloadUrl && (
+                <a className="btn btn-outline btn-sm" href={a.downloadUrl} target="_blank" rel="noreferrer">
+                  View
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <button className="btn btn-outline btn-sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+        {uploading ? uploadProgress || "Uploading..." : "+ Add Photo or Document"}
+      </button>
     </div>
   );
 }
@@ -166,6 +258,8 @@ function WorkOrderDetailModal({ workOrder, assets, staff, vendors, onClose, onSa
         ) : (
           <p className="text-sm" style={{ marginBottom: "1rem" }}>Status: <span className={`badge badge-${workOrder.status === "completed" ? "completed" : workOrder.status === "cancelled" ? "cancelled" : "active"}`}>{STATUS_LABELS[status]}</span></p>
         )}
+
+        <WorkOrderAttachments workOrderId={workOrder.id} />
 
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <button className="btn btn-outline" onClick={onClose} disabled={busy}>Close</button>

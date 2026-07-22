@@ -6,7 +6,7 @@
 // table for Facilities yet, see routes/portal.js's header note),
 // Documents, and Warranties.
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { portalApi } from "../api/portalClient";
 
@@ -86,6 +86,7 @@ function ServiceRequestsTab({ propertyId }) {
   const [requests, setRequests] = useState(null);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [attachmentsFor, setAttachmentsFor] = useState(null); // requestId or null
 
   const load = useCallback(() => {
     portalApi
@@ -137,6 +138,7 @@ function ServiceRequestsTab({ propertyId }) {
               <th>Submitted</th>
               <th>Completed</th>
               <th>Cost</th>
+              <th>Files</th>
             </tr>
           </thead>
           <tbody>
@@ -150,11 +152,125 @@ function ServiceRequestsTab({ propertyId }) {
                 <td>{formatDate(r.createdAt)}</td>
                 <td>{formatDate(r.completedAt)}</td>
                 <td>{r.costCents ? formatMoney(r.costCents) : "—"}</td>
+                <td>
+                  <button className="btn btn-outline btn-sm" onClick={() => setAttachmentsFor(r.id)}>
+                    View / Add
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
+
+      {attachmentsFor && (
+        <AttachmentsModal propertyId={propertyId} requestId={attachmentsFor} onClose={() => setAttachmentsFor(null)} />
+      )}
+    </div>
+  );
+}
+
+function AttachmentsModal({ propertyId, requestId, onClose }) {
+  const [attachments, setAttachments] = useState(null);
+  const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState("");
+  const fileInputRef = useRef(null);
+
+  const load = useCallback(() => {
+    portalApi
+      .get(`/properties/${propertyId}/service-requests/${requestId}/attachments`)
+      .then((data) => setAttachments(data.attachments))
+      .catch((err) => setError(err.message || "Couldn't load attachments."));
+  }, [propertyId, requestId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function handleFileSelected(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setError("");
+    setUploading(true);
+    try {
+      setUploadProgress("Preparing upload...");
+      const { uploadUrl, storageKey } = await portalApi.post(
+        `/properties/${propertyId}/service-requests/${requestId}/attachments/upload-url`,
+        { fileName: file.name, contentType: file.type || "application/octet-stream" }
+      );
+      setUploadProgress(`Uploading ${file.name}...`);
+      const putRes = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+      if (!putRes.ok) throw new Error("Upload to storage failed. Please try again.");
+      setUploadProgress("Finishing up...");
+      const { attachment } = await portalApi.post(
+        `/properties/${propertyId}/service-requests/${requestId}/attachments/confirm`,
+        { storageKey, fileName: file.name, contentType: file.type || "application/octet-stream", sizeBytes: file.size }
+      );
+      setAttachments((prev) => [{ ...attachment, uploadedByMe: true }, ...(prev || [])]);
+    } catch (err) {
+      setError(err.message || "Upload failed.");
+    } finally {
+      setUploading(false);
+      setUploadProgress("");
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>Photos & Documents</h3>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+        {error && <div className="error-msg">{error}</div>}
+
+        <input ref={fileInputRef} type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={handleFileSelected} />
+        <button
+          className="btn btn-primary"
+          style={{ width: "100%", justifyContent: "center", marginBottom: "1rem" }}
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+        >
+          {uploading ? uploadProgress || "Uploading..." : "+ Add Photo or Document"}
+        </button>
+
+        {attachments === null ? (
+          <div className="loading-spinner" />
+        ) : attachments.length === 0 ? (
+          <p className="text-steel text-sm">No photos or documents attached yet.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            {attachments.map((a) => (
+              <div
+                key={a.id}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "0.55rem 0.7rem",
+                  border: "1px solid var(--line)",
+                  borderRadius: 6,
+                }}
+              >
+                <span className="text-sm">
+                  {a.fileName} {a.uploadedByMe && <span className="text-steel">(you)</span>}
+                </span>
+                {a.downloadUrl && (
+                  <a className="btn btn-outline btn-sm" href={a.downloadUrl} target="_blank" rel="noreferrer">
+                    View
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

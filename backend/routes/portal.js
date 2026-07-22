@@ -14,6 +14,7 @@
 // revisiting if/when a real Facilities invoicing entity gets built.
 
 const express = require("express");
+const crypto = require("crypto");
 const pool = require("../db/pool");
 const { requirePortalAuth } = require("../middleware/auth");
 const r2 = require("../db/r2");
@@ -232,5 +233,142 @@ router.post("/properties/:propertyId/service-requests", requirePortalAuth, guard
     res.status(500).json({ error: "Something went wrong." });
   }
 });
+
+// ============================================================
+// SERVICE REQUEST ATTACHMENTS (owner-facing)
+// ============================================================
+// Same work_order_documents join the staff-facing endpoints in
+// routes/workorders.js use — an owner's photo and a staff member's
+// completion photo land in the same list, visible to both sides.
+
+async function guardPortalServiceRequest(req, res, next) {
+  try {
+    const access = await pool.query(
+      "SELECT 1 FROM portal_account_access WHERE portal_account_id = $1 AND project_id = $2",
+      [req.portalAccount.id, req.params.propertyId]
+    );
+    if (access.rows.length === 0) {
+      return res.status(404).json({ error: "Property not found." });
+    }
+    const wo = await pool.query("SELECT id FROM work_orders WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL", [
+      req.params.requestId,
+      req.params.propertyId,
+    ]);
+    if (wo.rows.length === 0) {
+      return res.status(404).json({ error: "Service request not found." });
+    }
+    next();
+  } catch (e) {
+    next(e);
+  }
+}
+
+function buildServiceRequestStorageKey(propertyId, fileName) {
+  const safeName = (fileName || "file").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
+  return `projects/${propertyId}/${crypto.randomUUID()}-${safeName}`;
+}
+
+/**
+ * GET /api/portal/properties/:propertyId/service-requests/:requestId/attachments
+ */
+router.get(
+  "/properties/:propertyId/service-requests/:requestId/attachments",
+  requirePortalAuth,
+  guardPortalServiceRequest,
+  async (req, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT d.id AS document_id, d.file_name, d.content_type, d.size_bytes, d.storage_key,
+                d.uploaded_by_portal_account_id, d.created_at
+         FROM work_order_documents wod
+         JOIN documents d ON d.id = wod.document_id
+         WHERE wod.work_order_id = $1
+         ORDER BY d.created_at DESC`,
+        [req.params.requestId]
+      );
+      const attachments = await Promise.all(
+        r.rows.map(async (row) => ({
+          id: row.document_id,
+          fileName: row.file_name,
+          contentType: row.content_type,
+          sizeBytes: row.size_bytes ? Number(row.size_bytes) : null,
+          uploadedByMe: row.uploaded_by_portal_account_id === req.portalAccount.id,
+          createdAt: row.created_at,
+          downloadUrl: r2.isConfigured ? await r2.getDownloadUrl(row.storage_key, row.file_name) : null,
+        }))
+      );
+      res.json({ attachments });
+    } catch (err) {
+      console.error("[radah-pm] portal list attachments error:", err);
+      res.status(500).json({ error: "Something went wrong." });
+    }
+  }
+);
+
+/**
+ * POST /api/portal/properties/:propertyId/service-requests/:requestId/attachments/upload-url
+ * Body: { fileName, contentType }
+ */
+router.post(
+  "/properties/:propertyId/service-requests/:requestId/attachments/upload-url",
+  requirePortalAuth,
+  guardPortalServiceRequest,
+  async (req, res) => {
+    if (!r2.isConfigured) return res.status(503).json({ error: "Document storage is not configured yet." });
+    const { fileName, contentType } = req.body || {};
+    if (!fileName) return res.status(400).json({ error: "fileName is required." });
+    try {
+      const storageKey = buildServiceRequestStorageKey(req.params.propertyId, fileName);
+      const uploadUrl = await r2.getUploadUrl(storageKey, contentType);
+      res.json({ uploadUrl, storageKey });
+    } catch (err) {
+      console.error("[radah-pm] portal attachment upload-url error:", err);
+      res.status(500).json({ error: "Could not prepare the upload. Please try again." });
+    }
+  }
+);
+
+/**
+ * POST /api/portal/properties/:propertyId/service-requests/:requestId/attachments/confirm
+ * Body: { storageKey, fileName, contentType, sizeBytes }
+ */
+router.post(
+  "/properties/:propertyId/service-requests/:requestId/attachments/confirm",
+  requirePortalAuth,
+  guardPortalServiceRequest,
+  async (req, res) => {
+    if (!r2.isConfigured) return res.status(503).json({ error: "Document storage is not configured yet." });
+    const { storageKey, fileName, contentType, sizeBytes } = req.body || {};
+    if (!storageKey || !fileName) return res.status(400).json({ error: "storageKey and fileName are required." });
+    if (!storageKey.startsWith(`projects/${req.params.propertyId}/`)) {
+      return res.status(400).json({ error: "Invalid storage key for this property." });
+    }
+    try {
+      const doc = await pool.query(
+        `INSERT INTO documents (project_id, storage_key, file_name, content_type, size_bytes, uploaded_by_portal_account_id)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, file_name, content_type, size_bytes, created_at`,
+        [req.params.propertyId, storageKey, fileName, contentType || null, sizeBytes || null, req.portalAccount.id]
+      );
+      await pool.query(
+        `INSERT INTO work_order_documents (work_order_id, document_id) VALUES ($1, $2)
+         ON CONFLICT (work_order_id, document_id) DO NOTHING`,
+        [req.params.requestId, doc.rows[0].id]
+      );
+      res.status(201).json({
+        attachment: {
+          id: doc.rows[0].id,
+          fileName: doc.rows[0].file_name,
+          contentType: doc.rows[0].content_type,
+          sizeBytes: doc.rows[0].size_bytes ? Number(doc.rows[0].size_bytes) : null,
+          uploadedByMe: true,
+          createdAt: doc.rows[0].created_at,
+        },
+      });
+    } catch (err) {
+      console.error("[radah-pm] portal attachment confirm error:", err);
+      res.status(500).json({ error: "Could not save the attachment." });
+    }
+  }
+);
 
 module.exports = router;
