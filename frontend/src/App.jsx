@@ -15,6 +15,7 @@ import ProjectDetailPage from "./pages/ProjectDetailPage.jsx";
 import PropertiesPage from "./pages/PropertiesPage.jsx";
 import PropertyDetailPage from "./pages/PropertyDetailPage.jsx";
 import VendorsPage from "./pages/VendorsPage.jsx";
+import ProtectPage from "./pages/ProtectPage.jsx";
 import UsersPage from "./pages/UsersPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
 import PlatformAdminPage from "./pages/PlatformAdminPage.jsx";
@@ -89,6 +90,7 @@ export default function App() {
         <Route path="properties" element={<PropertiesPage />} />
         <Route path="properties/:id" element={<PropertyDetailPage />} />
         <Route path="vendors" element={<VendorsPage />} />
+        <Route path="protect" element={<ProtectPage />} />
         <Route
           path="users"
           element={

@@ -30,6 +30,7 @@ function NavForVertical({ vertical }) {
       <>
         <NavLink to="/properties" className={({ isActive }) => (isActive ? "active" : "")}>Properties</NavLink>
         <NavLink to="/vendors" className={({ isActive }) => (isActive ? "active" : "")}>Vendors</NavLink>
+        <NavLink to="/protect" className={({ isActive }) => (isActive ? "active" : "")}>Protect</NavLink>
       </>
     );
   }
